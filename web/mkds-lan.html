@@ -1,0 +1,237 @@
+<!doctype html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Mario Kart DS LAN</title>
+    <style>
+        :root {
+            color-scheme: dark;
+            --bg: #101316;
+            --panel: #1b2025;
+            --line: #303842;
+            --text: #edf2f7;
+            --muted: #9aa7b3;
+            --accent: #35c2ff;
+        }
+
+        * {
+            box-sizing: border-box;
+        }
+
+        html,
+        body {
+            height: 100%;
+            margin: 0;
+        }
+
+        body {
+            background: var(--bg);
+            color: var(--text);
+            font: 14px/1.4 system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+            overflow: hidden;
+        }
+
+        .shell {
+            display: grid;
+            grid-template-rows: auto 1fr;
+            gap: 10px;
+            height: 100%;
+            padding: 10px;
+        }
+
+        .bar {
+            align-items: center;
+            background: var(--panel);
+            border: 1px solid var(--line);
+            border-radius: 6px;
+            display: grid;
+            gap: 10px;
+            grid-template-columns: auto minmax(120px, 1fr) auto auto;
+            min-height: 48px;
+            padding: 8px 10px;
+        }
+
+        h1 {
+            font-size: 16px;
+            font-weight: 700;
+            margin: 0;
+            white-space: nowrap;
+        }
+
+        label {
+            align-items: center;
+            color: var(--muted);
+            display: flex;
+            gap: 8px;
+            min-width: 0;
+        }
+
+        input {
+            background: #0d1115;
+            border: 1px solid var(--line);
+            border-radius: 4px;
+            color: var(--text);
+            font: inherit;
+            min-width: 0;
+            padding: 7px 8px;
+            width: 100%;
+        }
+
+        button {
+            background: var(--accent);
+            border: 0;
+            border-radius: 4px;
+            color: #061017;
+            cursor: pointer;
+            font: 700 13px/1 system-ui, sans-serif;
+            min-height: 34px;
+            padding: 0 12px;
+        }
+
+        .grid {
+            display: grid;
+            gap: 10px;
+            grid-template-columns: repeat(2, minmax(0, 1fr));
+            min-height: 0;
+        }
+
+        .player {
+            background: #07090c;
+            border: 1px solid var(--line);
+            border-radius: 6px;
+            display: grid;
+            grid-template-rows: auto 1fr;
+            min-height: 0;
+            overflow: hidden;
+        }
+
+        .player__head {
+            align-items: center;
+            border-bottom: 1px solid var(--line);
+            display: flex;
+            justify-content: space-between;
+            min-height: 34px;
+            padding: 0 10px;
+        }
+
+        .player__head span:first-child {
+            font-weight: 700;
+        }
+
+        .player__head span:last-child {
+            color: var(--muted);
+            font-size: 12px;
+            min-width: 0;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
+
+        iframe {
+            border: 0;
+            height: 100%;
+            min-height: 0;
+            width: 100%;
+        }
+
+        @media (max-width: 980px) {
+            .shell {
+                overflow: auto;
+            }
+
+            body {
+                overflow: auto;
+            }
+
+            .bar {
+                grid-template-columns: 1fr;
+            }
+
+            .grid {
+                grid-template-columns: 1fr;
+            }
+
+            .player {
+                min-height: 640px;
+            }
+        }
+    </style>
+</head>
+<body>
+<main class="shell">
+    <header class="bar">
+        <h1>Mario Kart DS LAN</h1>
+        <label>
+            Room
+            <input id="room" value="mkds-demo" spellcheck="false">
+        </label>
+        <button id="reload" type="button">Reload</button>
+        <button id="open" type="button">Open P2</button>
+    </header>
+    <section class="grid">
+        <article class="player">
+            <div class="player__head">
+                <span>Player 1</span>
+                <span id="p1-url"></span>
+            </div>
+            <iframe id="p1" title="Player 1"></iframe>
+        </article>
+        <article class="player">
+            <div class="player__head">
+                <span>Player 2</span>
+                <span id="p2-url"></span>
+            </div>
+            <iframe id="p2" title="Player 2"></iframe>
+        </article>
+    </section>
+</main>
+<script>
+    const params = new URLSearchParams(location.search);
+    const game = params.get("game") || "Mario-Kart-DS-USA";
+    const roomInput = document.getElementById("room");
+    const p1 = document.getElementById("p1");
+    const p2 = document.getElementById("p2");
+    const p1Url = document.getElementById("p1-url");
+    const p2Url = document.getElementById("p2-url");
+
+    if (params.get("room")) {
+        roomInput.value = params.get("room");
+    }
+
+    function frameUrl(slot) {
+        const room = `${roomInput.value}-p${slot}___${game}`;
+        const url = new URL("/", location.href);
+        url.searchParams.set("id", room);
+        url.searchParams.set("player", "1");
+        url.searchParams.set("zone", params.get(`zone${slot}`) || `mkds-p${slot}`);
+        const wid = params.get(`wid${slot}`);
+        if (wid) {
+            url.searchParams.set("wid", wid);
+        }
+        return url.pathname + url.search;
+    }
+
+    function loadFrames() {
+        const p1Src = frameUrl(1);
+        const p2Src = frameUrl(2);
+        p1.src = p1Src;
+        p2.src = p2Src;
+        p1Url.textContent = p1Src;
+        p2Url.textContent = p2Src;
+        const pageUrl = new URL(location.href);
+        pageUrl.searchParams.set("room", roomInput.value);
+        history.replaceState(null, "", pageUrl);
+    }
+
+    document.getElementById("reload").addEventListener("click", loadFrames);
+    document.getElementById("open").addEventListener("click", () => window.open(frameUrl(2), "_blank", "noopener"));
+    roomInput.addEventListener("keydown", (event) => {
+        if (event.key === "Enter") {
+            loadFrames();
+        }
+    });
+    loadFrames();
+</script>
+</body>
+</html>

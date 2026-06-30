@@ -25,6 +25,9 @@ const parseURLForRoom = () => {
     if (typeof queryDict.id === 'string') {
         room = decodeURIComponent(queryDict.id);
     }
+    if (typeof queryDict.zone === 'string') {
+        zone = decodeURIComponent(queryDict.zone);
+    }
 
     return [room, zone];
 };

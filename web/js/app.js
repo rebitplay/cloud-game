@@ -563,6 +563,12 @@ sub(SETTINGS_CHANGED, () => {
 // initial app state
 setState(app.state.eden);
 
+const pageParams = new URLSearchParams(document.location.search);
+const initialPlayer = Number.parseInt(pageParams.get("player") || "", 10);
+if (initialPlayer >= 1 && initialPlayer <= 4) {
+    playerIndex.value = initialPlayer;
+}
+
 input.init();
 
 stream.init();
@@ -570,7 +576,7 @@ screen.init();
 
 let [roomId, zone] = room.loadMaybe();
 // find worker id if present
-const wid = new URLSearchParams(document.location.search).get("wid");
+const wid = pageParams.get("wid");
 // if from URL -> start game immediately!
 socket.init(roomId, wid, zone);
 api.transport = {

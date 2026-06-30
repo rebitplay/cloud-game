@@ -35,10 +35,11 @@ var (
 type Nanoarch struct {
 	Handlers
 
-	keyboard KeyboardState
-	mouse    MouseState
-	pointer  PointerState
-	retropad InputState
+	keyboard  KeyboardState
+	mouse     MouseState
+	pointer   PointerState
+	retropad  InputState
+	netpacket netpacketState
 
 	keyboardCb    *C.struct_retro_keyboard_callback
 	LastFrameTime time.Time
@@ -208,6 +209,7 @@ func (n *Nanoarch) CoreLoad(meta Metadata) {
 	n.keyboard = KeyboardState{}
 	n.mouse = MouseState{}
 	n.pointer = PointerState{}
+	n.netpacket.reset()
 
 	n.options = maps.Clone(meta.Options)
 	n.options4rom = meta.Options4rom
@@ -357,11 +359,13 @@ func (n *Nanoarch) LoadGame(path string) error {
 	}
 
 	n.LastFrameTime = time.Now()
+	n.startNetpacketFromEnv()
 
 	return nil
 }
 
 func (n *Nanoarch) Shutdown() {
+	n.stopNetpacket()
 	Nan0.audioBuffCb = nil
 	if n.LibCo {
 		thread.Main(func() {
@@ -879,6 +883,9 @@ func coreEnvironment(cmd C.unsigned, data unsafe.Pointer) C.bool {
 	case C.RETRO_ENVIRONMENT_SET_MINIMUM_AUDIO_LATENCY:
 		latency := *(*C.unsigned)(data)
 		Nan0.log.Info().Uint("latency_ms", uint(latency)).Msg("audio latency requested")
+		return true
+	case C.RETRO_ENVIRONMENT_SET_NETPACKET_INTERFACE:
+		Nan0.setNetpacketCallback(data)
 		return true
 	}
 	return false

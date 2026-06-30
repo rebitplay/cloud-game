@@ -166,6 +166,35 @@ void bridge_retro_keyboard_callback(void *cb, bool down, unsigned keycode, uint3
     (*(retro_keyboard_event_t *) cb)(down, keycode, character, keyModifiers);
 }
 
+void coreNetpacketSend(int flags, const void *buf, size_t len, uint16_t client_id);
+void coreNetpacketPollReceive(void);
+
+static void core_netpacket_send_cgo(int flags, const void *buf, size_t len, uint16_t client_id) {
+    coreNetpacketSend(flags, buf, len, client_id);
+}
+
+static void core_netpacket_poll_receive_cgo(void) {
+    coreNetpacketPollReceive();
+}
+
+void bridge_netpacket_start(struct retro_netpacket_callback *cb, uint16_t client_id) {
+    if (cb && cb->start) {
+        cb->start(client_id, core_netpacket_send_cgo, core_netpacket_poll_receive_cgo);
+    }
+}
+
+void bridge_netpacket_receive(struct retro_netpacket_callback *cb, const void *buf, size_t len, uint16_t client_id) {
+    if (cb && cb->receive && buf && len > 0) {
+        cb->receive(buf, len, client_id);
+    }
+}
+
+void bridge_netpacket_stop(struct retro_netpacket_callback *cb) {
+    if (cb && cb->stop) {
+        cb->stop();
+    }
+}
+
 bool core_environment_cgo(unsigned cmd, void *data) {
     bool coreEnvironment(unsigned, void *);
 

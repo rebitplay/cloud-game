@@ -1,0 +1,104 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+cd "$ROOT"
+
+COORDINATOR_ADDR="${COORDINATOR_ADDR:-:8020}"
+COORDINATOR_HOST="${COORDINATOR_HOST:-127.0.0.1:8020}"
+HUB_ADDR="${HUB_ADDR:-127.0.0.1:55355}"
+ROOM="${ROOM:-mkds-demo}"
+RUNTIME_DIR="${RUNTIME_DIR:-$ROOT/.runtime/mkds-lan}"
+WORKER1_ADDR="${WORKER1_ADDR:-:9021}"
+WORKER2_ADDR="${WORKER2_ADDR:-:9022}"
+PUBLIC_ADDRESS="${PUBLIC_ADDRESS:-}"
+ICE_IP_MAP="${ICE_IP_MAP:-}"
+
+mkdir -p "$RUNTIME_DIR/logs"
+
+if [[ "${NO_BUILD:-0}" != "1" ]]; then
+    GO_BIN="${GO_BIN:-$(command -v go || true)}"
+    if [[ -z "$GO_BIN" && -x /usr/local/go/bin/go ]]; then
+        GO_BIN=/usr/local/go/bin/go
+    fi
+    if [[ -z "$GO_BIN" ]]; then
+        echo "go binary not found; set GO_BIN=/path/to/go or run with NO_BUILD=1 after building" >&2
+        exit 1
+    fi
+    mkdir -p bin
+    "$GO_BIN" build -o bin/ ./cmd/coordinator ./cmd/worker ./cmd/melonds-netpacket-hub
+fi
+
+pids=()
+
+cleanup() {
+    for pid in "${pids[@]:-}"; do
+        kill "$pid" 2>/dev/null || true
+    done
+    wait 2>/dev/null || true
+}
+trap cleanup EXIT INT TERM
+
+start() {
+    local name="$1"
+    shift
+    "$@" >"$RUNTIME_DIR/logs/$name.log" 2>&1 &
+    local pid=$!
+    pids+=("$pid")
+    printf "%-12s pid=%s log=%s\n" "$name" "$pid" "$RUNTIME_DIR/logs/$name.log"
+}
+
+start hub ./bin/melonds-netpacket-hub -address "$HUB_ADDR"
+
+start coordinator env \
+    CLOUD_GAME_COORDINATOR_DEBUG=true \
+    ./bin/coordinator -address "$COORDINATOR_ADDR"
+
+sleep 1
+
+worker_env=(
+    CLOUD_GAME_WORKER_DEBUG=true
+    CLOUD_GAME_WEBRTC_INCLUDELOOPBACKCANDIDATE=true
+)
+
+if [[ -n "$PUBLIC_ADDRESS" ]]; then
+    worker_env+=("CLOUD_GAME_WORKER_NETWORK_PUBLICADDRESS=$PUBLIC_ADDRESS")
+fi
+if [[ -n "$ICE_IP_MAP" ]]; then
+    worker_env+=("CLOUD_GAME_WEBRTC_ICEIPMAP=$ICE_IP_MAP")
+fi
+
+start worker-p1 env \
+    "${worker_env[@]}" \
+    CLOUD_GAME_WORKER_TAG=mkds-p1 \
+    CLOUD_GAME_EMULATOR_STORAGE="$RUNTIME_DIR/p1/save" \
+    CLOUD_GAME_EMULATOR_LOCALPATH="$RUNTIME_DIR/p1/libretro" \
+    MELONDS_NETPLAY_HUB="$HUB_ADDR" \
+    MELONDS_NETPLAY_ROOM="$ROOM" \
+    MELONDS_NETPLAY_CLIENT_ID=1 \
+    ./bin/worker -address "$WORKER1_ADDR" -monitoring.port 6621 -coordinatorhost "$COORDINATOR_HOST" -zone mkds-p1
+
+start worker-p2 env \
+    "${worker_env[@]}" \
+    CLOUD_GAME_WORKER_TAG=mkds-p2 \
+    CLOUD_GAME_EMULATOR_STORAGE="$RUNTIME_DIR/p2/save" \
+    CLOUD_GAME_EMULATOR_LOCALPATH="$RUNTIME_DIR/p2/libretro" \
+    MELONDS_NETPLAY_HUB="$HUB_ADDR" \
+    MELONDS_NETPLAY_ROOM="$ROOM" \
+    MELONDS_NETPLAY_CLIENT_ID=2 \
+    ./bin/worker -address "$WORKER2_ADDR" -monitoring.port 6622 -coordinatorhost "$COORDINATOR_HOST" -zone mkds-p2
+
+cat <<EOF
+
+Mario Kart DS LAN demo is starting.
+
+Open:
+  http://fedora${COORDINATOR_ADDR}/mkds-lan.html?room=${ROOM}
+
+If remote WebRTC ICE fails over Tailscale, restart with:
+  PUBLIC_ADDRESS=fedora ICE_IP_MAP=<tailscale-ip> $0
+
+Press Ctrl-C to stop all demo processes.
+EOF
+
+wait
