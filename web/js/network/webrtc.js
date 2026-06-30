@@ -5,6 +5,7 @@ let /** @type {Map<string, RTCDataChannel>} */ channels = new Map();
 let /** @type {MediaStream} */ stream;
 let caller = false;
 let signal;
+let sdpExchangePending = false;
 
 const ice = ((signaller) => {
     // Buffer is used to store ICE candidates while
@@ -39,6 +40,10 @@ const ice = ((signaller) => {
         log.debug(`[rtc] [ice] connection state: ${pc.iceConnectionState}`);
         switch (pc.iceConnectionState) {
             case "failed":
+                if (sdpExchangePending || !pc.localDescription) {
+                    log.debug("[rtc] [ice] failure during SDP exchange, waiting");
+                    return;
+                }
                 log.error("[rtc] [ice] failed establish connection, retry...");
                 pc.restartIce();
                 break;
@@ -90,6 +95,32 @@ const mung = (sdp) =>
 
 const stub = () => {};
 
+const localSdp = (fallback) => {
+    const sdp = pc?.localDescription || fallback;
+    return {
+        type: sdp.type,
+        sdp: mung(sdp.sdp),
+    };
+};
+
+const waitForIceGathering = (timeoutMs = 1200) => {
+    if (!pc || pc.iceGatheringState === "complete") return Promise.resolve();
+
+    return new Promise((resolve) => {
+        const done = () => {
+            clearTimeout(timer);
+            pc?.removeEventListener("icegatheringstatechange", onStateChange);
+            resolve();
+        };
+        const onStateChange = () => {
+            if (pc?.iceGatheringState === "complete") done();
+        };
+        const timer = setTimeout(done, timeoutMs);
+
+        pc.addEventListener("icegatheringstatechange", onStateChange);
+    });
+};
+
 const offer = async () => {
     if (!pc || !caller) return;
 
@@ -97,8 +128,10 @@ const offer = async () => {
         const offer = await pc.createOffer();
         offer.sdp = mung(offer.sdp);
         await pc.setLocalDescription(offer);
-        log.debug("[rtc] [sdp] local:", offer);
-        return offer;
+        await waitForIceGathering();
+        const local = localSdp(offer);
+        log.debug("[rtc] [sdp] local:", local);
+        return local;
     } catch (e) {
         log.error("[rtc] [sdp] local:", e);
     }
@@ -118,6 +151,7 @@ export const webrtc = {
         signalling,
     } = {}) => {
         let connectionTime;
+        let failureTimer;
 
         iceServers = iceServers || [];
         log.debug("[rtc] [config] ICE:", iceServers);
@@ -171,13 +205,25 @@ export const webrtc = {
             log.debug(`[rtc] connection state: ${pc.connectionState}`);
             switch (pc.connectionState) {
                 case "connected":
+                    clearTimeout(failureTimer);
                     onConnect();
                     log.debug(
                         `[rtc] connection time: ${performance.now() - connectionTime}ms`,
                     );
                     break;
                 case "failed":
+                    clearTimeout(failureTimer);
+                    failureTimer = setTimeout(() => {
+                        if (
+                            pc?.connectionState === "failed" &&
+                            !sdpExchangePending
+                        ) {
+                            onDisconnect();
+                        }
+                    }, 5000);
+                    break;
                 case "closed":
+                    clearTimeout(failureTimer);
                     onDisconnect();
                     break;
             }
@@ -185,7 +231,12 @@ export const webrtc = {
         pc.onnegotiationneeded = () => {
             log.debug("[rtc] negotiation");
         };
-        pc.ontrack = (event) => stream.addTrack(event.track);
+        pc.ontrack = (event) => {
+            stream.addTrack(event.track);
+            media?.dispatchEvent(
+                new CustomEvent("streamtrack", { detail: { track: event.track } }),
+            );
+        };
         pc.onsignalingstatechange = () => {
             log.debug(`[rtc] [sig] state: ${pc.signalingState}`);
 
@@ -196,10 +247,15 @@ export const webrtc = {
 
         connectionTime = performance.now();
         if (initiator) {
-            offer().then((offer) => {
-                if (!offer) return;
-                signalling.init({ initiator, sdpOffer: offer });
-            });
+            sdpExchangePending = true;
+            offer()
+                .then((offer) => {
+                    if (!offer) return;
+                    signalling.init({ initiator, sdpOffer: offer });
+                })
+                .finally(() => {
+                    sdpExchangePending = false;
+                });
         } else {
             signalling.init();
         }
@@ -212,7 +268,9 @@ export const webrtc = {
 
         try {
             await pc.setRemoteDescription(new RTCSessionDescription(sdp));
-            ice.flush(pc);
+            if (pc.signalingState === "stable") {
+                ice.flush(pc);
+            }
         } catch (e) {
             log.error("[rtc] [sdp] remote:", e);
             return;
@@ -221,13 +279,18 @@ export const webrtc = {
         if (caller) return;
 
         try {
+            sdpExchangePending = true;
             const answer = await pc.createAnswer();
             answer.sdp = mung(answer.sdp);
             await pc.setLocalDescription(answer);
-            log.debug("[rtc] [sdp] local:", answer);
-            signal?.sendSdp(answer);
+            await waitForIceGathering();
+            const local = localSdp(answer);
+            log.debug("[rtc] [sdp] local:", local);
+            signal?.sendSdp(local);
         } catch (e) {
             log.error("[rtc] [sdp] local:", e);
+        } finally {
+            sdpExchangePending = false;
         }
     },
     candidate: (/** @type {RTCIceCandidateInit | string} */ candidate) => {

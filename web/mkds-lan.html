@@ -47,7 +47,7 @@
             border-radius: 6px;
             display: grid;
             gap: 10px;
-            grid-template-columns: auto minmax(120px, 1fr) auto auto;
+            grid-template-columns: auto minmax(120px, 1fr) auto auto auto;
             min-height: 48px;
             padding: 8px 10px;
         }
@@ -78,6 +78,16 @@
             width: 100%;
         }
 
+        select {
+            background: #0d1115;
+            border: 1px solid var(--line);
+            border-radius: 4px;
+            color: var(--text);
+            font: inherit;
+            min-height: 34px;
+            padding: 6px 8px;
+        }
+
         button {
             background: var(--accent);
             border: 0;
@@ -94,6 +104,10 @@
             gap: 10px;
             grid-template-columns: repeat(2, minmax(0, 1fr));
             min-height: 0;
+        }
+
+        .grid[data-count="1"] {
+            grid-template-columns: minmax(0, 1fr);
         }
 
         .player {
@@ -166,38 +180,35 @@
             Room
             <input id="room" value="mkds-demo" spellcheck="false">
         </label>
+        <label>
+            Players
+            <select id="players">
+                <option value="1">1</option>
+                <option value="2">2</option>
+                <option value="3">3</option>
+                <option value="4">4</option>
+            </select>
+        </label>
         <button id="reload" type="button">Reload</button>
         <button id="open" type="button">Open P2</button>
     </header>
-    <section class="grid">
-        <article class="player">
-            <div class="player__head">
-                <span>Player 1</span>
-                <span id="p1-url"></span>
-            </div>
-            <iframe id="p1" title="Player 1"></iframe>
-        </article>
-        <article class="player">
-            <div class="player__head">
-                <span>Player 2</span>
-                <span id="p2-url"></span>
-            </div>
-            <iframe id="p2" title="Player 2"></iframe>
-        </article>
-    </section>
+    <section class="grid" id="grid"></section>
 </main>
 <script>
     const params = new URLSearchParams(location.search);
     const game = params.get("game") || "Mario-Kart-DS-USA";
+    const bootDelayMs = Math.max(0, Number.parseInt(params.get("bootDelayMs") || "700", 10) || 0);
     const roomInput = document.getElementById("room");
-    const p1 = document.getElementById("p1");
-    const p2 = document.getElementById("p2");
-    const p1Url = document.getElementById("p1-url");
-    const p2Url = document.getElementById("p2-url");
+    const playerSelect = document.getElementById("players");
+    const grid = document.getElementById("grid");
+    const slots = new Map();
 
     if (params.get("room")) {
         roomInput.value = params.get("room");
     }
+
+    const initialPlayers = Math.max(1, Math.min(4, Number.parseInt(params.get("players") || "2", 10) || 2));
+    playerSelect.value = String(initialPlayers);
 
     function frameUrl(slot) {
         const room = `${roomInput.value}-p${slot}___${game}`;
@@ -205,7 +216,7 @@
         url.searchParams.set("id", room);
         url.searchParams.set("player", "1");
         url.searchParams.set("zone", params.get(`zone${slot}`) || `mkds-p${slot}`);
-        url.searchParams.set("client", "v5");
+        url.searchParams.set("client", "v7");
         const wid = params.get(`wid${slot}`);
         if (wid) {
             url.searchParams.set("wid", wid);
@@ -213,20 +224,55 @@
         return url.pathname + url.search;
     }
 
+    function playerCount() {
+        return Math.max(1, Math.min(4, Number.parseInt(playerSelect.value, 10) || 2));
+    }
+
+    function ensureSlots(count) {
+        grid.dataset.count = String(count);
+        for (const [slot, article] of slots) {
+            if (slot > count) {
+                article.remove();
+                slots.delete(slot);
+            }
+        }
+        for (let slot = 1; slot <= count; slot++) {
+            if (slots.has(slot)) continue;
+            const article = document.createElement("article");
+            article.className = "player";
+            article.innerHTML = `
+                <div class="player__head">
+                    <span>Player ${slot}</span>
+                    <span id="p${slot}-url"></span>
+                </div>
+                <iframe id="p${slot}" title="Player ${slot}" allow="autoplay; fullscreen; gamepad"></iframe>
+            `;
+            grid.appendChild(article);
+            slots.set(slot, article);
+        }
+    }
+
     function loadFrames() {
-        const p1Src = frameUrl(1);
-        const p2Src = frameUrl(2);
-        p1.src = p1Src;
-        p2.src = p2Src;
-        p1Url.textContent = p1Src;
-        p2Url.textContent = p2Src;
+        const count = playerCount();
+        ensureSlots(count);
+        for (let slot = 1; slot <= count; slot++) {
+            const src = frameUrl(slot);
+            const frame = document.getElementById(`p${slot}`);
+            frame.src = "about:blank";
+            setTimeout(() => {
+                frame.src = src;
+            }, (slot - 1) * bootDelayMs);
+            document.getElementById(`p${slot}-url`).textContent = src;
+        }
         const pageUrl = new URL(location.href);
         pageUrl.searchParams.set("room", roomInput.value);
+        pageUrl.searchParams.set("players", String(count));
         history.replaceState(null, "", pageUrl);
     }
 
     document.getElementById("reload").addEventListener("click", loadFrames);
     document.getElementById("open").addEventListener("click", () => window.open(frameUrl(2), "_blank", "noopener"));
+    playerSelect.addEventListener("change", loadFrames);
     roomInput.addEventListener("keydown", (event) => {
         if (event.key === "Enter") {
             loadFrames();

@@ -28,6 +28,7 @@ const state = {
     flip: false,
     ready: false,
     autoplayWait: false,
+    playPending: false,
 };
 
 const mute = (mute) => (videoEl.muted = mute);
@@ -47,17 +48,36 @@ const onPlay = () => {
     useCustomScreen(options.mirrorMode === "mirror");
 };
 
-const play = () =>
-    videoEl
-        .play()
-        ?.then(onPlay)
+const hasMedia = () =>
+    videoEl.readyState > HTMLMediaElement.HAVE_NOTHING ||
+    !!videoEl.srcObject?.getTracks?.().length;
+
+const play = () => {
+    if (state.playPending) return;
+
+    const attempt = videoEl.play();
+    if (!attempt) {
+        onPlay();
+        return;
+    }
+
+    state.playPending = true;
+    attempt
+        .then(() => {
+            state.playPending = false;
+            onPlay();
+        })
         .catch((error) => {
+            state.playPending = false;
             if (error.name === "NotAllowedError") {
-                showPlayButton();
-            } else {
+                if (hasMedia() && !videoEl.muted) {
+                    showPlayButton();
+                }
+            } else if (error.name !== "AbortError") {
                 log.error("Playback fail", error);
             }
         });
+};
 
 const toggle = (show) =>
     state.screen.toggleAttribute("hidden", show === undefined ? show : !show);
@@ -118,6 +138,15 @@ playEl.addEventListener("click", () => {
     play();
     toggle();
 });
+
+const retryPlay = () => {
+    if (!state.autoplayWait) play();
+};
+
+videoEl.addEventListener("streamtrack", retryPlay);
+videoEl.addEventListener("loadedmetadata", retryPlay);
+videoEl.addEventListener("canplay", retryPlay);
+videoEl.addEventListener("playing", onPlay);
 
 // Track resize even when the underlying media stream changes its video size
 videoEl.addEventListener("resize", () => {

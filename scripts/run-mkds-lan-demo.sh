@@ -9,11 +9,19 @@ COORDINATOR_HOST="${COORDINATOR_HOST:-127.0.0.1:8020}"
 HUB_ADDR="${HUB_ADDR:-127.0.0.1:55355}"
 ROOM="${ROOM:-mkds-demo}"
 RUNTIME_DIR="${RUNTIME_DIR:-$ROOT/.runtime/mkds-lan}"
+PLAYER_COUNT="${PLAYER_COUNT:-4}"
 WORKER1_ADDR="${WORKER1_ADDR:-:9021}"
 WORKER2_ADDR="${WORKER2_ADDR:-:9022}"
+WORKER3_ADDR="${WORKER3_ADDR:-:9023}"
+WORKER4_ADDR="${WORKER4_ADDR:-:9024}"
 PUBLIC_ADDRESS="${PUBLIC_ADDRESS:-}"
 ICE_IP_MAP="${ICE_IP_MAP:-}"
 INCLUDE_LOOPBACK="${INCLUDE_LOOPBACK:-false}"
+
+if (( PLAYER_COUNT < 1 || PLAYER_COUNT > 4 )); then
+    echo "PLAYER_COUNT must be between 1 and 4" >&2
+    exit 1
+fi
 
 mkdir -p "$RUNTIME_DIR/logs"
 
@@ -70,32 +78,26 @@ if [[ -n "$ICE_IP_MAP" ]]; then
     worker_env+=("CLOUD_GAME_WEBRTC_ICEIPMAP=$ICE_IP_MAP")
 fi
 
-start worker-p1 env \
-    "${worker_env[@]}" \
-    CLOUD_GAME_WORKER_TAG=mkds-p1 \
-    CLOUD_GAME_EMULATOR_STORAGE="$RUNTIME_DIR/p1/save" \
-    CLOUD_GAME_EMULATOR_LOCALPATH="$RUNTIME_DIR/p1/libretro" \
-    MELONDS_NETPLAY_HUB="$HUB_ADDR" \
-    MELONDS_NETPLAY_ROOM="$ROOM" \
-    MELONDS_NETPLAY_CLIENT_ID=1 \
-    ./bin/worker -address "$WORKER1_ADDR" -monitoring.port 6621 -coordinatorhost "$COORDINATOR_HOST" -zone mkds-p1
-
-start worker-p2 env \
-    "${worker_env[@]}" \
-    CLOUD_GAME_WORKER_TAG=mkds-p2 \
-    CLOUD_GAME_EMULATOR_STORAGE="$RUNTIME_DIR/p2/save" \
-    CLOUD_GAME_EMULATOR_LOCALPATH="$RUNTIME_DIR/p2/libretro" \
-    MELONDS_NETPLAY_HUB="$HUB_ADDR" \
-    MELONDS_NETPLAY_ROOM="$ROOM" \
-    MELONDS_NETPLAY_CLIENT_ID=2 \
-    ./bin/worker -address "$WORKER2_ADDR" -monitoring.port 6622 -coordinatorhost "$COORDINATOR_HOST" -zone mkds-p2
+for slot in $(seq 1 "$PLAYER_COUNT"); do
+    addr_var="WORKER${slot}_ADDR"
+    worker_addr="${!addr_var}"
+    start "worker-p${slot}" env \
+        "${worker_env[@]}" \
+        CLOUD_GAME_WORKER_TAG="mkds-p${slot}" \
+        CLOUD_GAME_EMULATOR_STORAGE="$RUNTIME_DIR/p${slot}/save" \
+        CLOUD_GAME_EMULATOR_LOCALPATH="$RUNTIME_DIR/p${slot}/libretro" \
+        MELONDS_NETPLAY_HUB="$HUB_ADDR" \
+        MELONDS_NETPLAY_ROOM="$ROOM" \
+        MELONDS_NETPLAY_CLIENT_ID="$slot" \
+        ./bin/worker -address "$worker_addr" -monitoring.port "$((6620 + slot))" -coordinatorhost "$COORDINATOR_HOST" -zone "mkds-p${slot}"
+done
 
 cat <<EOF
 
-Mario Kart DS LAN demo is starting.
+Mario Kart DS LAN demo is starting with ${PLAYER_COUNT} player worker(s).
 
 Open:
-  http://fedora${COORDINATOR_ADDR}/mkds-lan.html?room=${ROOM}
+  http://fedora${COORDINATOR_ADDR}/mkds-lan.html?room=${ROOM}&players=${PLAYER_COUNT}
 
 If remote WebRTC ICE fails over Tailscale, restart with:
   PUBLIC_ADDRESS=fedora ICE_IP_MAP=<tailscale-ip> $0

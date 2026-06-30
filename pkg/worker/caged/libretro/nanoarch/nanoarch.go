@@ -322,8 +322,13 @@ func (n *Nanoarch) LoadGame(path string) error {
 	}
 	n.sys.av = av
 
-	n.serializeSize = C.bridge_retro_serialize_size(retroSerializeSize)
-	n.log.Info().Msgf("Save file size: %v", byteCountBinary(int64(n.serializeSize)))
+	if strings.Contains(strings.ToLower(n.meta.LibPath), "melonds") {
+		n.serializeSize = 0
+		n.log.Info().Msg("Skipping startup save-state size probe for melonDS")
+	} else {
+		n.serializeSize = C.bridge_retro_serialize_size(retroSerializeSize)
+		n.log.Info().Msgf("Save file size: %v", byteCountBinary(int64(n.serializeSize)))
+	}
 
 	Nan0.tickTime = time.Duration(float64(time.Second) / float64(n.sys.av.timing.fps))
 	if n.vfr {
