@@ -205,6 +205,7 @@
         url.searchParams.set("id", room);
         url.searchParams.set("player", "1");
         url.searchParams.set("zone", params.get(`zone${slot}`) || `mkds-p${slot}`);
+        url.searchParams.set("client", "v4");
         const wid = params.get(`wid${slot}`);
         if (wid) {
             url.searchParams.set("wid", wid);

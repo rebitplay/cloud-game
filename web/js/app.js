@@ -40,15 +40,15 @@ import { input, KEY } from "input";
 import { socket, webrtc } from "network";
 import { debounce } from "utils";
 
-import { gameList } from "./gameList.js?v=3";
-import { menu } from "./menu.js?v=3";
-import { message } from "./message.js?v=3";
-import { recording } from "./recording.js?v=3";
-import { room } from "./room.js?v=3";
-import { screen } from "./screen.js?v=3";
-import { stats } from "./stats.js?v=3";
-import { stream } from "./stream.js?v=3";
-import { workerManager } from "./workerManager.js?v=3";
+import { gameList } from "./gameList.js?v=4";
+import { menu } from "./menu.js?v=4";
+import { message } from "./message.js?v=4";
+import { recording } from "./recording.js?v=4";
+import { room } from "./room.js?v=4";
+import { screen } from "./screen.js?v=4";
+import { stats } from "./stats.js?v=4";
+import { stream } from "./stream.js?v=4";
+import { workerManager } from "./workerManager.js?v=4";
 
 settings.init();
 log.level = settings.loadOr(opts.LOG_LEVEL, log.DEFAULT);

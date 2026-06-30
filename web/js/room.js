@@ -12,7 +12,7 @@ const roomLabel = document.getElementById('room-txt');
 const parseURLForRoom = () => {
     let queryDict = {};
     let regex = /^\/?([A-Za-z]*)\/?/g;
-    const zone = regex.exec(location.pathname)[1];
+    let zone = regex.exec(location.pathname)[1];
     let room = null;
 
     // get room from URL
