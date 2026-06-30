@@ -87,6 +87,10 @@ func (r *Room[T]) Id() string           { return r.id }
 func (r *Room[T]) SetApp(app app.App)   { r.app = app }
 func (r *Room[T]) SetMedia(m MediaPipe) { r.media = m }
 func (r *Room[T]) StartApp()            { r.app.Start() }
+func (r *Room[T]) AddUser(user T)       { r.users.Add(user) }
+func (r *Room[T]) RemoveUser(user T) int {
+	return r.users.RemoveL(user)
+}
 func (r *Room[T]) Send(data []byte) {
 	for u := range r.users.Values() {
 		u.SendData(data)
@@ -163,7 +167,8 @@ func (p AppSession) Id() SessionKey { return p.uid }
 
 type GameSession struct {
 	AppSession
-	Index int // track user Index (i.e. player 1,2,3,4 select)
+	RoomId string
+	Index  int // track user Index (i.e. player 1,2,3,4 select)
 }
 
 func NewGameSession(id string, s Session) *GameSession {

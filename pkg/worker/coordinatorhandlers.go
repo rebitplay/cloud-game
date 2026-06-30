@@ -110,7 +110,8 @@ func (c *coordinator) HandleGameStart(rq api.StartGameRequest, w *Worker) api.Ou
 		}
 		game := games.GameMetadata(gameInfo)
 
-		r = room.NewRoom(uid, nil, w.router.Users(), nil)
+		roomUsers := com.NewNetMap[room.SessionKey, *room.GameSession]()
+		r = room.NewRoom(uid, nil, &roomUsers, nil)
 		r.HandleClose = func() {
 			c.CloseRoom(uid)
 			c.log.Debug().Msgf("room close request %v sent", uid)
@@ -198,6 +199,9 @@ func (c *coordinator) HandleGameStart(rq api.StartGameRequest, w *Worker) api.Ou
 	needsKbMouse := r.App().KbMouseSupport()
 	needsPointer := r.App().PointerSupport()
 
+	user.RoomId = r.Id()
+	r.AddUser(user)
+
 	s := room.WithWebRTC(user.Session)
 	s.OnMessage(func(data []byte) { r.App().Input(user.Index, byte(caged.RetroPad), data) })
 	if needsKbMouse {
@@ -234,9 +238,28 @@ func (c *coordinator) HandleGameStart(rq api.StartGameRequest, w *Worker) api.Ou
 	return api.Out{Payload: response}
 }
 
+func removeUserFromRoom(w *Worker, user *room.GameSession) {
+	if user.RoomId == "" {
+		return
+	}
+
+	r := w.router.FindRoom(user.RoomId)
+	if r == nil {
+		user.RoomId = ""
+		return
+	}
+
+	user.RoomId = ""
+	if left := r.RemoveUser(user); left == 0 {
+		r.Close()
+		w.router.SetRoom(nil)
+	}
+}
+
 // HandleTerminateSession handles cases when a user has been disconnected from the websocket of coordinator.
 func (c *coordinator) HandleTerminateSession(rq api.TerminateSessionRequest, w *Worker) {
 	if user := w.router.FindUser(rq.Id); user != nil {
+		removeUserFromRoom(w, user)
 		w.router.Remove(user)
 		user.Disconnect()
 	}
@@ -245,6 +268,7 @@ func (c *coordinator) HandleTerminateSession(rq api.TerminateSessionRequest, w *
 // HandleQuitGame handles cases when a user manually exits the game.
 func (c *coordinator) HandleQuitGame(rq api.GameQuitRequest, w *Worker) {
 	if user := w.router.FindUser(rq.Id); user != nil {
+		removeUserFromRoom(w, user)
 		w.router.Remove(user)
 	}
 }
