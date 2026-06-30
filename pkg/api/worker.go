@@ -33,6 +33,7 @@ type (
 		AV      *AppVideoInfo `json:"av"`
 		Record  bool          `json:"record"`
 		KbMouse bool          `json:"kb_mouse"`
+		Pointer bool          `json:"pointer"`
 	}
 	RecordGameRequest struct {
 		StatefulRoom

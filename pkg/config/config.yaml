@@ -311,6 +311,15 @@ emulator:
                         # in order to support up to 5-player games
                         # see: https://nintendo.fandom.com/wiki/Super_Multitap
                         1: 257
+                nds:
+                    lib: melondsds_libretro
+                    roms: ["nds"]
+                    pointerSupport: true
+                    maxThreads: 4
+                    options:
+                        melonds_touch_mode: touch
+                        melonds_render_mode: software
+                        melonds_screen_layout1: top-bottom
                 n64:
                     lib: mupen64plus_next_libretro
                     roms: ["n64", "v64", "z64"]

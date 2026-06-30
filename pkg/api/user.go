@@ -15,6 +15,7 @@ type (
 		RoomId  string        `json:"roomId"`
 		Av      *AppVideoInfo `json:"av"`
 		KbMouse bool          `json:"kb_mouse"`
+		Pointer bool          `json:"pointer"`
 	}
 	IceServer struct {
 		Urls       string `json:"urls,omitempty"`

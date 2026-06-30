@@ -15,6 +15,7 @@ void input_cache_set_port(unsigned port, uint32_t buttons,
 void input_cache_set_keyboard_key(unsigned id, uint8_t pressed);
 void input_cache_set_keyboard_bulk(const uint8_t *keys, size_t count);
 void input_cache_set_mouse(int16_t dx, int16_t dy, uint8_t buttons);
+void input_cache_set_pointer(int16_t x, int16_t y, uint8_t pressed);
 void input_cache_clear(void);
 */
 import "C"
@@ -31,6 +32,7 @@ const (
 	RetroPad Device = iota
 	Keyboard
 	Mouse
+	Pointer
 )
 
 const (
@@ -171,4 +173,27 @@ func (ms *MouseState) Buttons() (l, r, m bool) {
 // SyncToCache syncs mouse state to C-side cache, consuming deltas.
 func (ms *MouseState) SyncToCache() {
 	C.input_cache_set_mouse(C.int16_t(ms.dx.Swap(0)), C.int16_t(ms.dy.Swap(0)), C.uint8_t(ms.buttons.Load()))
+}
+
+// PointerState tracks absolute libretro pointer/touch coordinates.
+type PointerState struct {
+	x, y    atomic.Int32
+	pressed atomic.Int32
+}
+
+// SetInput sets pointer state.
+//
+//	[P:1][X:2][Y:2]
+func (ps *PointerState) SetInput(data []byte) {
+	if len(data) != 5 {
+		return
+	}
+	ps.pressed.Store(int32(data[0]))
+	ps.x.Store(int32(int16(binary.BigEndian.Uint16(data[1:]))))
+	ps.y.Store(int32(int16(binary.BigEndian.Uint16(data[3:]))))
+}
+
+// SyncToCache syncs pointer state to C-side cache.
+func (ps *PointerState) SyncToCache() {
+	C.input_cache_set_pointer(C.int16_t(ps.x.Load()), C.int16_t(ps.y.Load()), C.uint8_t(ps.pressed.Load()))
 }

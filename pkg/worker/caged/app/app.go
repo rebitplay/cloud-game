@@ -20,6 +20,7 @@ type App interface {
 	SetDataCb(func([]byte))
 	Input(port int, device byte, data []byte)
 	KbMouseSupport() bool
+	PointerSupport() bool
 }
 
 type Audio struct {

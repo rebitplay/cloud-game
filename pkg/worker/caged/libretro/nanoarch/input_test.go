@@ -492,6 +492,70 @@ func TestMouseState_Concurrent(t *testing.T) {
 	wg.Wait()
 }
 
+func TestPointerState_SetInput(t *testing.T) {
+	tests := []struct {
+		name    string
+		data    []byte
+		x       int16
+		y       int16
+		pressed int32
+	}{
+		{
+			name:    "pressed center",
+			data:    []byte{1, 0, 0, 0, 0},
+			pressed: 1,
+		},
+		{
+			name:    "pressed extremes",
+			data:    []byte{1, 0x7f, 0xff, 0x80, 0x00},
+			x:       32767,
+			y:       -32768,
+			pressed: 1,
+		},
+		{
+			name: "released negative",
+			data: []byte{0, 0xff, 0xff, 0xff, 0xfe},
+			x:    -1,
+			y:    -2,
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			ps := PointerState{}
+			ps.SetInput(test.data)
+
+			if got := int16(ps.x.Load()); got != test.x {
+				t.Errorf("x: got %v, want %v", got, test.x)
+			}
+			if got := int16(ps.y.Load()); got != test.y {
+				t.Errorf("y: got %v, want %v", got, test.y)
+			}
+			if got := ps.pressed.Load(); got != test.pressed {
+				t.Errorf("pressed: got %v, want %v", got, test.pressed)
+			}
+		})
+	}
+}
+
+func TestPointerState_SetInputInvalidLength(t *testing.T) {
+	ps := PointerState{}
+	ps.SetInput([]byte{1, 0x12, 0x34, 0x56, 0x78})
+
+	ps.SetInput([]byte{0, 0, 0, 0})
+	ps.SetInput([]byte{0, 0, 0, 0, 0, 0})
+
+	if got := ps.pressed.Load(); got != 1 {
+		t.Errorf("pressed: got %v, want 1", got)
+	}
+	if got := int16(ps.x.Load()); got != 0x1234 {
+		t.Errorf("x: got %v, want %v", got, int16(0x1234))
+	}
+	if got := int16(ps.y.Load()); got != 0x5678 {
+		t.Errorf("y: got %v, want %v", got, int16(0x5678))
+	}
+}
+
 func TestConstants(t *testing.T) {
 	// MouseBtnState
 	if MouseLeft != 1 || MouseRight != 2 || MouseMiddle != 4 {
@@ -499,7 +563,7 @@ func TestConstants(t *testing.T) {
 	}
 
 	// Device
-	if RetroPad != 0 || Keyboard != 1 || Mouse != 2 {
+	if RetroPad != 0 || Keyboard != 1 || Mouse != 2 || Pointer != 3 {
 		t.Error("invalid Device constants")
 	}
 

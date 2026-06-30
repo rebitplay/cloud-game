@@ -41,6 +41,12 @@ let transport = {
             packet,
         );
     },
+    pointer: (packet) => {
+        log.warn(
+            "Default transport is used! Change it with the api.transport variable.",
+            packet,
+        );
+    },
 };
 
 const packet = (type, payload, id) => {
@@ -123,6 +129,20 @@ const mousePress = (() => {
         dv.setUint8(0, mouse.BUTTONS);
         dv.setUint8(1, pressed ? b2r[button] : 0);
         transport.mouse(buffer);
+    };
+})();
+
+const pointerUpdate = (() => {
+    // 0 1 2 3 4
+    // P X  Y
+    const buffer = new ArrayBuffer(5);
+    const dv = new DataView(buffer);
+
+    return ({ pressed = false, x = 0, y = 0 } = {}) => {
+        dv.setUint8(0, +pressed);
+        dv.setInt16(1, x);
+        dv.setInt16(3, y);
+        transport.pointer(buffer);
     };
 })();
 
@@ -358,6 +378,9 @@ export const api = {
             mouse: {
                 move: mouseMove,
                 press: mousePress,
+            },
+            pointer: {
+                update: pointerUpdate,
             },
         },
         load: () => packet(endpoints.GAME_LOAD),

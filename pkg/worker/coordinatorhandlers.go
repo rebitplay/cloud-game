@@ -196,12 +196,16 @@ func (c *coordinator) HandleGameStart(rq api.StartGameRequest, w *Worker) api.Ou
 	}
 
 	needsKbMouse := r.App().KbMouseSupport()
+	needsPointer := r.App().PointerSupport()
 
 	s := room.WithWebRTC(user.Session)
 	s.OnMessage(func(data []byte) { r.App().Input(user.Index, byte(caged.RetroPad), data) })
 	if needsKbMouse {
 		_, _ = s.Channel("keyboard", nil, func(data []byte) { r.App().Input(user.Index, byte(caged.Keyboard), data) })
 		_, _ = s.Channel("mouse", nil, func(data []byte) { r.App().Input(user.Index, byte(caged.Mouse), data) })
+	}
+	if needsPointer {
+		_, _ = s.Channel("pointer", nil, func(data []byte) { r.App().Input(user.Index, byte(caged.Pointer), data) })
 	}
 
 	c.RegisterRoom(r.Id())
@@ -210,6 +214,7 @@ func (c *coordinator) HandleGameStart(rq api.StartGameRequest, w *Worker) api.Ou
 		Room:    api.Room{Rid: r.Id()},
 		Record:  w.conf.Recording.Enabled,
 		KbMouse: needsKbMouse,
+		Pointer: needsPointer,
 	}
 
 	if r.App().AspectEnabled() {

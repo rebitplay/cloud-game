@@ -37,6 +37,7 @@ type Nanoarch struct {
 
 	keyboard KeyboardState
 	mouse    MouseState
+	pointer  PointerState
 	retropad InputState
 
 	keyboardCb    *C.struct_retro_keyboard_callback
@@ -105,6 +106,7 @@ type Metadata struct {
 	Hid             map[int][]int
 	CoreAspectRatio bool
 	KbMouseSupport  bool
+	PointerSupport  bool
 	LibExt          string
 }
 
@@ -155,6 +157,7 @@ func (n *Nanoarch) AudioSampleRate() int             { return int(n.sys.av.timin
 func (n *Nanoarch) VideoFramerate() float64          { return float64(n.sys.av.timing.fps) }
 func (n *Nanoarch) IsPortrait() bool                 { return 90 == n.Rot%180 }
 func (n *Nanoarch) KbMouseSupport() bool             { return n.meta.KbMouseSupport }
+func (n *Nanoarch) PointerSupport() bool             { return n.meta.PointerSupport }
 func (n *Nanoarch) BaseWidth() int                   { return int(n.sys.av.geometry.base_width) }
 func (n *Nanoarch) BaseHeight() int                  { return int(n.sys.av.geometry.base_height) }
 func (n *Nanoarch) WaitReady()                       { <-n.reserved }
@@ -204,6 +207,7 @@ func (n *Nanoarch) CoreLoad(meta Metadata) {
 	n.keyboardCb = nil
 	n.keyboard = KeyboardState{}
 	n.mouse = MouseState{}
+	n.pointer = PointerState{}
 
 	n.options = maps.Clone(meta.Options)
 	n.options4rom = meta.Options4rom
@@ -411,6 +415,7 @@ func (n *Nanoarch) syncInputToCache() {
 		n.keyboard.SyncToCache()
 	}
 	n.mouse.SyncToCache()
+	n.pointer.SyncToCache()
 }
 
 func (n *Nanoarch) Run() {
@@ -461,6 +466,8 @@ func (n *Nanoarch) InputMouse(_ int, data []byte) {
 		n.mouse.SetButtons(state[0])
 	}
 }
+
+func (n *Nanoarch) InputPointer(_ int, data []byte) { n.pointer.SetInput(data) }
 
 func videoSetPixelFormat(format uint32) (C.bool, error) {
 	switch format {

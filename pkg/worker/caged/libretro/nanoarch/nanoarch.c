@@ -41,6 +41,9 @@ typedef struct {
     int16_t mouse_x;
     int16_t mouse_y;
     uint8_t mouse_buttons;
+    int16_t pointer_x;
+    int16_t pointer_y;
+    uint8_t pointer_pressed;
 } input_cache_t;
 
 static input_cache_t input_cache = {0};
@@ -72,6 +75,12 @@ void input_cache_set_mouse(int16_t dx, int16_t dy, uint8_t buttons) {
     input_cache.mouse_x = dx;
     input_cache.mouse_y = dy;
     input_cache.mouse_buttons = buttons;
+}
+
+void input_cache_set_pointer(int16_t x, int16_t y, uint8_t pressed) {
+    input_cache.pointer_x = x;
+    input_cache.pointer_y = y;
+    input_cache.pointer_pressed = pressed;
 }
 
 void input_cache_clear(void) {
@@ -263,6 +272,17 @@ int16_t core_input_state_cgo(unsigned port, unsigned device, unsigned index, uns
                     return (input_cache.mouse_buttons & 0x02) ? 1 : 0;
                 case RETRO_DEVICE_ID_MOUSE_MIDDLE:
                     return (input_cache.mouse_buttons & 0x04) ? 1 : 0;
+            }
+            break;
+
+        case RETRO_DEVICE_POINTER:
+            switch (id) {
+                case RETRO_DEVICE_ID_POINTER_X:
+                    return input_cache.pointer_x;
+                case RETRO_DEVICE_ID_POINTER_Y:
+                    return input_cache.pointer_y;
+                case RETRO_DEVICE_ID_POINTER_PRESSED:
+                    return input_cache.pointer_pressed ? 1 : 0;
             }
             break;
     }

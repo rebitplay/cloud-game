@@ -94,6 +94,7 @@ const (
 	RetroPad = Device(nanoarch.RetroPad)
 	Keyboard = Device(nanoarch.Keyboard)
 	Mouse    = Device(nanoarch.Mouse)
+	Pointer  = Device(nanoarch.Pointer)
 )
 
 var (
@@ -180,6 +181,7 @@ func (f *Frontend) LoadCore(emu string) {
 		UsesLibCo:       conf.UsesLibCo,
 		CoreAspectRatio: conf.CoreAspectRatio,
 		KbMouseSupport:  conf.KbMouseSupport,
+		PointerSupport:  conf.PointerSupport,
 		LibExt:          libExt,
 	}
 	f.mu.Lock()
@@ -406,6 +408,7 @@ func (f *Frontend) HasSave() bool                 { return os.Exists(f.HashPath(
 func (f *Frontend) HashPath() string              { return f.storage.GetSavePath() }
 func (f *Frontend) IsPortrait() bool              { return f.nano.IsPortrait() }
 func (f *Frontend) KbMouseSupport() bool          { return f.nano.KbMouseSupport() }
+func (f *Frontend) PointerSupport() bool          { return f.nano.PointerSupport() }
 func (f *Frontend) PixFormat() uint32             { return f.nano.Video.PixFmt.C }
 func (f *Frontend) Reset()                        { f.mu.Lock(); defer f.mu.Unlock(); f.nano.Reset() }
 func (f *Frontend) RestoreGameState() error       { return f.Load() }
@@ -430,6 +433,8 @@ func (f *Frontend) Input(port int, device byte, data []byte) {
 		f.nano.InputKeyboard(port, data)
 	case Mouse:
 		f.nano.InputMouse(port, data)
+	case Pointer:
+		f.nano.InputPointer(port, data)
 	}
 }
 

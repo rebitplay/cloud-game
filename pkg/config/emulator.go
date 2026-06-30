@@ -87,6 +87,7 @@ type LibretroCoreConfig struct {
 	SaveStateFs     string
 	Scale           float64
 	ScaleMethod     string
+	PointerSupport  bool
 	MaxThreads      int
 	UniqueSaveDir   bool
 	UsesLibCo       bool

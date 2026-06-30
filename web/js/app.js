@@ -24,7 +24,9 @@ import {
     MESSAGE,
     MOUSE_MOVED,
     MOUSE_PRESSED,
+    POINTER_FLAG,
     POINTER_LOCK_CHANGE,
+    POINTER_UPDATED,
     RECORDING_STATUS_CHANGED,
     RECORDING_TOGGLED,
     REFRESH_INPUT,
@@ -199,6 +201,7 @@ const onMessage = (m) => {
         case api.endpoint.GAME_START:
             if (payload.av) pub(APP_VIDEO_CHANGED, payload.av);
             if (payload.kb_mouse) pub(KB_MOUSE_FLAG);
+            if (payload.pointer) pub(POINTER_FLAG);
             pub(GAME_ROOM_AVAILABLE, { roomId: payload.roomId });
             break;
         case api.endpoint.GAME_SAVE:
@@ -539,6 +542,7 @@ sub(KEYBOARD_KEY_UP, (v) => state.keyboardInput?.(false, v));
 // mouse handler in the Screen Lock mode
 sub(MOUSE_MOVED, (e) => state.mouseMove?.(e));
 sub(MOUSE_PRESSED, (e) => state.mousePress?.(e));
+sub(POINTER_UPDATED, (e) => api.game.input.pointer.update(e));
 
 // general keyboard handler
 sub(KEY_PRESSED, onKeyPress);
@@ -573,6 +577,7 @@ api.transport = {
     send: socket.send,
     keyboard: (data) => webrtc.send("keyboard", data),
     mouse: (data) => webrtc.send("mouse", data),
+    pointer: (data) => webrtc.send("pointer", data),
 };
 
 // stats

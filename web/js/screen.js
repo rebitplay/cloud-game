@@ -1,4 +1,4 @@
-import { sub, SETTINGS_CHANGED, REFRESH_INPUT } from "event";
+import { sub, SETTINGS_CHANGED, POINTER_FLAG, REFRESH_INPUT } from "event";
 import { env } from "env";
 import { input, pointer, keyboard } from "input";
 import { opts, settings } from "settings";
@@ -37,6 +37,10 @@ const trackPointer = pointer.track(rootEl, () => {
     const display = state.current;
     return { ...display.video.size, s: !!display?.hasDisplay };
 });
+const trackTouch = pointer.trackTouch(rootEl, () => {
+    const video = state.current?.video?.el;
+    return { w: video?.videoWidth, h: video?.videoHeight };
+});
 
 const fullscreen = () => {
     if (state.current?.noFullscreen) return;
@@ -74,6 +78,10 @@ rootEl.addEventListener("fullscreenchange", async () => {
 
 sub(REFRESH_INPUT, async () => {
     await controls(document.fullscreenElement !== null);
+});
+
+sub(POINTER_FLAG, () => {
+    trackTouch(true);
 });
 
 export const screen = {

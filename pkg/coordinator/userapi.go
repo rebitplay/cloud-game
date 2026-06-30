@@ -37,6 +37,6 @@ func (u *User) SendWebrtcIceCandidate(candidate string) {
 }
 
 // StartGame signals the user that everything is ready to start a game.
-func (u *User) StartGame(av *api.AppVideoInfo, kbMouse bool) {
-	u.Notify(api.StartGame, api.GameStartUserResponse{RoomId: u.w.RoomId, Av: av, KbMouse: kbMouse})
+func (u *User) StartGame(av *api.AppVideoInfo, kbMouse bool, pointer bool) {
+	u.Notify(api.StartGame, api.GameStartUserResponse{RoomId: u.w.RoomId, Av: av, KbMouse: kbMouse, Pointer: pointer})
 }
