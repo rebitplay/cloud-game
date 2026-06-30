@@ -13,6 +13,7 @@ WORKER1_ADDR="${WORKER1_ADDR:-:9021}"
 WORKER2_ADDR="${WORKER2_ADDR:-:9022}"
 PUBLIC_ADDRESS="${PUBLIC_ADDRESS:-}"
 ICE_IP_MAP="${ICE_IP_MAP:-}"
+INCLUDE_LOOPBACK="${INCLUDE_LOOPBACK:-false}"
 
 mkdir -p "$RUNTIME_DIR/logs"
 
@@ -52,13 +53,14 @@ start hub ./bin/melonds-netpacket-hub -address "$HUB_ADDR"
 
 start coordinator env \
     CLOUD_GAME_COORDINATOR_DEBUG=true \
+    CLOUD_GAME_COORDINATOR_SERVER_CACHECONTROL=no-store \
     ./bin/coordinator -address "$COORDINATOR_ADDR"
 
 sleep 1
 
 worker_env=(
     CLOUD_GAME_WORKER_DEBUG=true
-    CLOUD_GAME_WEBRTC_INCLUDELOOPBACKCANDIDATE=true
+    CLOUD_GAME_WEBRTC_INCLUDELOOPBACKCANDIDATE="$INCLUDE_LOOPBACK"
 )
 
 if [[ -n "$PUBLIC_ADDRESS" ]]; then
