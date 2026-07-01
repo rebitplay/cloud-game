@@ -7,6 +7,7 @@ import {
 const page = document.getElementsByTagName('html')[0];
 const gameBoy = document.getElementById('gamebody');
 const sourceLink = document.getElementsByClassName('source')[0];
+const streamOnly = new URLSearchParams(window.location.search).get("view") === "stream";
 
 export const browser = {unknown: 0, firefox: 1, chrome: 2, edge: 3, safari: 4}
 export const platform = {unknown: 0, windows: 1, linux: 2, macos: 3, android: 4,}
@@ -15,6 +16,13 @@ let isLayoutSwitched = false;
 
 // Window rerender / rotate screen if needed
 const fixScreenLayout = () => {
+    if (streamOnly) {
+        isLayoutSwitched = false;
+        gameBoy.style.removeProperty('transform');
+        sourceLink.style['display'] = 'none';
+        return;
+    }
+
     let pw = getWidth(page),
         ph = getHeight(page),
         targetWidth = Math.round(pw * 0.9 / 2) * 2,

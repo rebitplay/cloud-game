@@ -59,6 +59,7 @@ const options = {
 // application display state
 let state;
 let lastState;
+let gameCleanupSent = false;
 
 // first user interaction
 let interacted = false;
@@ -155,6 +156,7 @@ const startGame = () => {
     }
 
     log.debug("[control] game start");
+    gameCleanupSent = false;
 
     setState(app.state.game);
 
@@ -173,6 +175,26 @@ const startGame = () => {
     gui.show(keyButtons[KEY.SAVE]);
     gui.show(keyButtons[KEY.LOAD]);
     input.retropad.toggle(true);
+};
+
+const quitCurrentGame = (
+    reason = "cleanup",
+    { resetRoom = false, stopRtc = false, closeSocket = false } = {},
+) => {
+    if (gameCleanupSent || !room.id) return false;
+
+    gameCleanupSent = true;
+    log.debug(`[control] game cleanup: ${reason}`);
+    input.retropad.toggle(false);
+    api.game.quit(room.id);
+
+    if (resetRoom) room.reset();
+    if (stopRtc) webrtc.stop();
+    if (closeSocket) {
+        window.setTimeout(socket.close, 100);
+    }
+
+    return true;
 };
 
 const saveGame = debounce(() => api.game.save(), 1000);
@@ -441,10 +463,14 @@ const app = {
                         updatePlayerIndex(3);
                         break;
                     case KEY.QUIT:
-                        input.retropad.toggle(false);
-                        api.game.quit(room.id);
-                        room.reset();
-                        window.location = window.location.pathname;
+                        quitCurrentGame("button", {
+                            resetRoom: true,
+                            stopRtc: true,
+                            closeSocket: true,
+                        });
+                        window.setTimeout(() => {
+                            window.location = window.location.pathname;
+                        }, 150);
                         break;
                     case KEY.RESET:
                         api.game.reset(room.id);
@@ -508,7 +534,7 @@ function handleWebrtcStart({ data, initiator }) {
         },
         onConnect: onConnectionReady,
         onDisconnect: () => {
-            input.retropad.toggle(false);
+            quitCurrentGame("webrtc-disconnect");
             webrtc.stop();
         },
         signalling: {
@@ -585,6 +611,13 @@ api.transport = {
     mouse: (data) => webrtc.send("mouse", data),
     pointer: (data) => webrtc.send("pointer", data),
 };
+
+window.__cloudGameCleanup = (reason = "external") =>
+    quitCurrentGame(reason, { stopRtc: true, closeSocket: true });
+
+const cleanupOnPageExit = () => quitCurrentGame("page-exit");
+window.addEventListener("pagehide", cleanupOnPageExit);
+window.addEventListener("beforeunload", cleanupOnPageExit);
 
 // stats
 let WEBRTC_STATS_RTT;

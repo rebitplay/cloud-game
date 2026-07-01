@@ -180,3 +180,19 @@ WORKDIR /usr/local/share/cloud-game
 
 COPY --from=coordinator /cloud-game ./
 COPY --from=worker /cloud-game ./
+
+# Single-container test image for platforms where one app/container is simpler.
+FROM cloud-game AS bunny-magic
+
+RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
+    --mount=type=cache,target=/var/lib/apt,sharing=locked \
+    apt-get -q update && apt-get -q install --no-install-recommends -y \
+    xvfb && \
+    apt-get autoremove && \
+    rm -rf /var/lib/apt/lists/* /var/log/* /usr/share/bug /usr/share/doc /usr/share/doc-base
+
+COPY assets/cores/melondsds_libretro.so ./assets/cores/
+COPY assets/games/nds/Tetris-DS-(USA).nds ./assets/games/nds/
+COPY scripts/bunny-entrypoint.sh ./bunny-entrypoint.sh
+
+ENTRYPOINT ["./bunny-entrypoint.sh"]

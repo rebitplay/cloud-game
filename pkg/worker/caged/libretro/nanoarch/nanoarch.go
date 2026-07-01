@@ -41,17 +41,18 @@ type Nanoarch struct {
 	retropad  InputState
 	netpacket netpacketState
 
-	keyboardCb    *C.struct_retro_keyboard_callback
-	LastFrameTime time.Time
-	LibCo         bool
-	meta          Metadata
-	options       map[string]string
-	options4rom   map[string]map[string]string
-	reserved      chan struct{} // limits concurrent use
-	Rot           uint
-	serializeSize C.size_t
-	Stopped       atomic.Bool
-	sys           struct {
+	keyboardCb        *C.struct_retro_keyboard_callback
+	LastFrameTime     time.Time
+	LibCo             bool
+	meta              Metadata
+	netpacketRoomName string
+	options           map[string]string
+	options4rom       map[string]map[string]string
+	reserved          chan struct{} // limits concurrent use
+	Rot               uint
+	serializeSize     C.size_t
+	Stopped           atomic.Bool
+	sys               struct {
 		av  C.struct_retro_system_av_info
 		i   C.struct_retro_system_info
 		api C.unsigned
@@ -149,7 +150,11 @@ func NewNano(localPath string) *Nanoarch {
 	nano := &Nan0
 	nano.cSaveDirectory = C.CString(localPath + "/legacy_save")
 	nano.cSystemDirectory = C.CString(localPath + "/system")
-	nano.cUserName = C.CString("retro")
+	userName := firstEnv("LIBRETRO_USERNAME", "REBIT_LIBRETRO_USERNAME", "CLOUD_GAME_LIBRETRO_USERNAME")
+	if userName == "" {
+		userName = "retro"
+	}
+	nano.cUserName = C.CString(userName)
 	return nano
 }
 
@@ -186,6 +191,10 @@ func (n *Nanoarch) DeleteSaveDir() error {
 	return os.RemoveAll(dir)
 }
 
+func (n *Nanoarch) SetNetpacketRoom(room string) {
+	n.netpacketRoomName = room
+}
+
 func (n *Nanoarch) CoreLoad(meta Metadata) {
 	var err error
 	n.meta = meta
@@ -213,6 +222,13 @@ func (n *Nanoarch) CoreLoad(meta Metadata) {
 
 	n.options = maps.Clone(meta.Options)
 	n.options4rom = meta.Options4rom
+	if mac := firstEnv("MELONDS_MAC_ADDRESS", "REBIT_MELONDS_MAC_ADDRESS", "CLOUD_GAME_MELONDS_MAC_ADDRESS"); mac != "" {
+		if n.options == nil {
+			n.options = make(map[string]string)
+		}
+		n.options["melonds_mac_address_mode"] = mac
+		n.log.Info().Str("mac", mac).Msg("overriding melonDS MAC address")
+	}
 
 	corePath := meta.LibPath + meta.LibExt
 	coreLib, err = loadLib(corePath)
@@ -535,6 +551,9 @@ const (
 // SaveState returns emulator internal state.
 func SaveState() (State, error) {
 	size := C.bridge_retro_serialize_size(retroSerializeSize)
+	if size == 0 {
+		return nil, nil
+	}
 	data := make([]byte, uint(size))
 	rez := false
 
@@ -791,7 +810,19 @@ func coreEnvironment(cmd C.unsigned, data unsafe.Pointer) C.bool {
 		*(*C.bool)(data) = dup
 		return dup
 	case C.RETRO_ENVIRONMENT_GET_USERNAME:
+		Nan0.log.Debug().Str("username", C.GoString(Nan0.cUserName)).Msg("libretro username requested")
 		*(**C.char)(data) = Nan0.cUserName
+		return true
+	case C.RETRO_ENVIRONMENT_GET_CORE_OPTIONS_VERSION:
+		*(*C.unsigned)(data) = 2
+		return true
+	case C.RETRO_ENVIRONMENT_SET_CORE_OPTIONS_V2:
+		return true
+	case C.RETRO_ENVIRONMENT_SET_CORE_OPTIONS_V2_INTL:
+		return true
+	case C.RETRO_ENVIRONMENT_SET_CORE_OPTIONS_DISPLAY:
+		return true
+	case C.RETRO_ENVIRONMENT_SET_CORE_OPTIONS_UPDATE_DISPLAY_CALLBACK:
 		return true
 	case C.RETRO_ENVIRONMENT_GET_LOG_INTERFACE:
 		cb := (*C.struct_retro_log_callback)(data)

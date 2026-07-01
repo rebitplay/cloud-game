@@ -15,6 +15,7 @@ type Emulator struct {
 	LocalPath        string
 	Libretro         LibretroConfig
 	AutosaveSec      int
+	LoadSaveOnStart  bool
 	SkipLateFrames   bool
 	LogDroppedFrames bool
 }

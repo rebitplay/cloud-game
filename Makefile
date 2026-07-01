@@ -24,7 +24,7 @@ clean:
 
 build.coordinator:
 	mkdir -p bin/
-	go build $(TRIMPATH) -ldflags "-w -s -X 'main.Version=$(GIT_VERSION)'" -o bin/ ./cmd/coordinator
+	go build $(TRIMPATH) -ldflags "-w -s -X 'main.Version=$(GIT_VERSION)'" -o bin/ ./cmd/coordinator ./cmd/melonds-netpacket-hub
 
 build.worker:
 	mkdir -p bin/

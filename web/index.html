@@ -15,7 +15,13 @@
 
     <link rel="icon" href="data:,">
 
-    <link href="css/main.css?v=3" rel="stylesheet">
+    <script>
+        if (new URLSearchParams(location.search).get("view") === "stream") {
+            document.documentElement.classList.add("stream-only");
+        }
+    </script>
+
+    <link href="css/main.css?v=8" rel="stylesheet">
     <link href="css/ui.css?v=3" rel="stylesheet">
     <title>Cloud Retro</title>
 </head>
@@ -114,7 +120,7 @@
     {
       "imports": {
         "api": "./js/api.js?v=7",
-        "env": "./js/env.js?v=7",
+        "env": "./js/env.js?v=8",
         "event": "./js/event.js?v=7",
         "gui": "./js/gui.js?v=7",
         "input": "./js/input/input.js?v=7",

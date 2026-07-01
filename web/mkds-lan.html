@@ -3,7 +3,7 @@
 <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
-    <title>Mario Kart DS LAN</title>
+    <title>NDS LAN</title>
     <style>
         :root {
             color-scheme: dark;
@@ -47,7 +47,7 @@
             border-radius: 6px;
             display: grid;
             gap: 10px;
-            grid-template-columns: auto minmax(120px, 1fr) auto auto auto;
+            grid-template-columns: auto minmax(120px, 1fr) minmax(180px, 240px) auto auto auto auto;
             min-height: 48px;
             padding: 8px 10px;
         }
@@ -84,6 +84,7 @@
             border-radius: 4px;
             color: var(--text);
             font: inherit;
+            max-width: 100%;
             min-height: 34px;
             padding: 6px 8px;
         }
@@ -111,35 +112,12 @@
         }
 
         .player {
-            background: #07090c;
-            border: 1px solid var(--line);
-            border-radius: 6px;
-            display: grid;
-            grid-template-rows: auto 1fr;
+            background: #000;
+            border: 0;
+            border-radius: 0;
+            display: block;
             min-height: 0;
             overflow: hidden;
-        }
-
-        .player__head {
-            align-items: center;
-            border-bottom: 1px solid var(--line);
-            display: flex;
-            justify-content: space-between;
-            min-height: 34px;
-            padding: 0 10px;
-        }
-
-        .player__head span:first-child {
-            font-weight: 700;
-        }
-
-        .player__head span:last-child {
-            color: var(--muted);
-            font-size: 12px;
-            min-width: 0;
-            overflow: hidden;
-            text-overflow: ellipsis;
-            white-space: nowrap;
         }
 
         iframe {
@@ -175,10 +153,18 @@
 <body>
 <main class="shell">
     <header class="bar">
-        <h1>Mario Kart DS LAN</h1>
+        <h1>NDS LAN</h1>
         <label>
             Room
             <input id="room" value="mkds-demo" spellcheck="false">
+        </label>
+        <label>
+            Game
+            <select id="game">
+                <option value="Mario-Kart-DS-USA">Mario Kart DS</option>
+                <option value="Tetris-DS-(USA)">Tetris DS</option>
+                <option value="blocksds-local-multiplayer">blocksds local multiplayer</option>
+            </select>
         </label>
         <label>
             Players
@@ -189,6 +175,7 @@
                 <option value="4">4</option>
             </select>
         </label>
+        <button id="start" type="button">Start</button>
         <button id="reload" type="button">Reload</button>
         <button id="open" type="button">Open P2</button>
     </header>
@@ -196,27 +183,42 @@
 </main>
 <script>
     const params = new URLSearchParams(location.search);
-    const game = params.get("game") || "Mario-Kart-DS-USA";
     const bootDelayMs = Math.max(0, Number.parseInt(params.get("bootDelayMs") || "700", 10) || 0);
+    const closeDelayMs = Math.max(0, Number.parseInt(params.get("closeDelayMs") || "250", 10) || 0);
     const roomInput = document.getElementById("room");
+    const gameSelect = document.getElementById("game");
     const playerSelect = document.getElementById("players");
     const grid = document.getElementById("grid");
     const slots = new Map();
+    let launchSeq = 0;
+    let launchId = "";
 
     if (params.get("room")) {
         roomInput.value = params.get("room");
+    }
+    if (params.get("game")) {
+        const requestedGame = params.get("game");
+        if (![...gameSelect.options].some((option) => option.value === requestedGame)) {
+            const option = document.createElement("option");
+            option.value = requestedGame;
+            option.textContent = requestedGame;
+            gameSelect.appendChild(option);
+        }
+        gameSelect.value = requestedGame;
     }
 
     const initialPlayers = Math.max(1, Math.min(4, Number.parseInt(params.get("players") || "2", 10) || 2));
     playerSelect.value = String(initialPlayers);
 
     function frameUrl(slot) {
-        const room = `${roomInput.value}-p${slot}___${game}`;
+        const game = gameSelect.value;
+        const room = `${roomInput.value}-${launchId}-p${slot}___${game}`;
         const url = new URL("/", location.href);
         url.searchParams.set("id", room);
         url.searchParams.set("player", "1");
         url.searchParams.set("zone", params.get(`zone${slot}`) || `mkds-p${slot}`);
         url.searchParams.set("client", "v7");
+        url.searchParams.set("view", "stream");
         const wid = params.get(`wid${slot}`);
         if (wid) {
             url.searchParams.set("wid", wid);
@@ -228,11 +230,59 @@
         return Math.max(1, Math.min(4, Number.parseInt(playerSelect.value, 10) || 2));
     }
 
+    function updatePageUrl(count = playerCount()) {
+        const pageUrl = new URL(location.href);
+        pageUrl.searchParams.set("room", roomInput.value);
+        pageUrl.searchParams.set("players", String(count));
+        pageUrl.searchParams.set("game", gameSelect.value);
+        history.replaceState(null, "", pageUrl);
+    }
+
+    function renderSlots() {
+        const count = playerCount();
+        ensureSlots(count);
+        updatePageUrl(count);
+    }
+
+    function nextLaunchId() {
+        launchSeq += 1;
+        return `${Date.now().toString(36)}-${launchSeq.toString(36)}`;
+    }
+
+    function closeFrame(frame, reason) {
+        if (!frame || frame.src === "about:blank") {
+            return 0;
+        }
+
+        try {
+            if (typeof frame.contentWindow?.__cloudGameCleanup === "function") {
+                if (frame.contentWindow.__cloudGameCleanup(reason)) {
+                    return closeDelayMs;
+                }
+            }
+        } catch (error) {
+            console.debug("frame cleanup skipped", error);
+        }
+
+        return 0;
+    }
+
+    function closeSlot(slot, reason) {
+        return closeFrame(document.getElementById(`p${slot}`), reason);
+    }
+
+    function closeAllFrames(reason) {
+        for (const slot of slots.keys()) {
+            closeSlot(slot, reason);
+        }
+    }
+
     function ensureSlots(count) {
         grid.dataset.count = String(count);
         for (const [slot, article] of slots) {
             if (slot > count) {
-                article.remove();
+                const delay = closeSlot(slot, "mkds-lan-remove");
+                window.setTimeout(() => article.remove(), delay);
                 slots.delete(slot);
             }
         }
@@ -241,10 +291,6 @@
             const article = document.createElement("article");
             article.className = "player";
             article.innerHTML = `
-                <div class="player__head">
-                    <span>Player ${slot}</span>
-                    <span id="p${slot}-url"></span>
-                </div>
                 <iframe id="p${slot}" title="Player ${slot}" allow="autoplay; fullscreen; gamepad"></iframe>
             `;
             grid.appendChild(article);
@@ -254,31 +300,44 @@
 
     function loadFrames() {
         const count = playerCount();
+        launchId = nextLaunchId();
         ensureSlots(count);
         for (let slot = 1; slot <= count; slot++) {
             const src = frameUrl(slot);
             const frame = document.getElementById(`p${slot}`);
-            frame.src = "about:blank";
+            const reloadSeq = Number.parseInt(frame.dataset.reloadSeq || "0", 10) + 1;
+            const closeDelay = closeFrame(frame, "mkds-lan-reload");
+            frame.dataset.reloadSeq = String(reloadSeq);
             setTimeout(() => {
+                if (frame.dataset.reloadSeq !== String(reloadSeq)) return;
+                frame.src = "about:blank";
+            }, closeDelay);
+            setTimeout(() => {
+                if (frame.dataset.reloadSeq !== String(reloadSeq)) return;
                 frame.src = src;
-            }, (slot - 1) * bootDelayMs);
-            document.getElementById(`p${slot}-url`).textContent = src;
+            }, closeDelay + (slot - 1) * bootDelayMs);
         }
-        const pageUrl = new URL(location.href);
-        pageUrl.searchParams.set("room", roomInput.value);
-        pageUrl.searchParams.set("players", String(count));
-        history.replaceState(null, "", pageUrl);
+        updatePageUrl(count);
     }
 
+    document.getElementById("start").addEventListener("click", loadFrames);
     document.getElementById("reload").addEventListener("click", loadFrames);
-    document.getElementById("open").addEventListener("click", () => window.open(frameUrl(2), "_blank", "noopener"));
-    playerSelect.addEventListener("change", loadFrames);
+    document.getElementById("open").addEventListener("click", () => {
+        if (!launchId) {
+            launchId = nextLaunchId();
+        }
+        window.open(frameUrl(2), "_blank", "noopener");
+    });
+    playerSelect.addEventListener("change", renderSlots);
+    gameSelect.addEventListener("change", renderSlots);
+    window.addEventListener("pagehide", () => closeAllFrames("mkds-lan-pagehide"));
+    window.addEventListener("beforeunload", () => closeAllFrames("mkds-lan-beforeunload"));
     roomInput.addEventListener("keydown", (event) => {
         if (event.key === "Enter") {
-            loadFrames();
+            renderSlots();
         }
     });
-    loadFrames();
+    renderSlots();
 </script>
 </body>
 </html>

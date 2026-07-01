@@ -1,29 +1,134 @@
+x-worker-common: &worker-common
+    image: cloud-game-local
+    depends_on:
+        - coordinator
+        - melonds-netpacket-hub
+        - xvfb
+    volumes:
+        - ./assets/cores:/usr/local/share/cloud-game/assets/cores
+        - ./assets/games:/usr/local/share/cloud-game/assets/games
+        - x11:/tmp/.X11-unix
+
+x-worker-env: &worker-env
+    DISPLAY: :99
+    MESA_GL_VERSION_OVERRIDE: "4.5"
+    CLOUD_GAME_WORKER_DEBUG: "true"
+    CLOUD_GAME_ENCODER_VIDEO_CODEC: vp8
+    CLOUD_GAME_WEBRTC_INCLUDELOOPBACKCANDIDATE: "true"
+    CLOUD_GAME_WEBRTC_ICEIPMAP: "${CLOUD_GAME_WEBRTC_ICEIPMAP:-127.0.0.1}"
+    MELONDS_NETPLAY_HUB: melonds-netpacket-hub:55355
+    MELONDS_NETPLAY_ROOM: "${MELONDS_NETPLAY_ROOM:-mkds-demo}"
+
 services:
-    cloud-game:
+    coordinator:
         build: .
         image: cloud-game-local
-        container_name: cloud-game-local
-        depends_on:
-            - xvfb
+        container_name: cloud-game-coordinator
         environment:
-            - DISPLAY=:99
-            - MESA_GL_VERSION_OVERRIDE=4.5
-            - CLOUD_GAME_WEBRTC_SINGLEPORT=8443
-            # - CLOUD_GAME_WEBRTC_ICEIPMAP=127.0.0.1
-            - CLOUD_GAME_COORDINATOR_DEBUG=true
-            - CLOUD_GAME_WORKER_DEBUG=true
-            - CLOUD_GAME_ENCODER_VIDEO_CODEC=vp8
-            # - PION_LOG_TRACE=all
+            CLOUD_GAME_COORDINATOR_DEBUG: "true"
+            CLOUD_GAME_COORDINATOR_SERVER_CACHECONTROL: no-store
         ports:
             - "8000:8000"
-            - "9000:9000"
-            - "8443:8443/udp"
-        command: >
-            bash -c "./coordinator & while [ ! -S /tmp/.X11-unix/X99 ]; do sleep 0.1; done; ./worker"
+        command: ./coordinator
+        volumes:
+            - ./assets/games:/usr/local/share/cloud-game/assets/games
+
+    melonds-netpacket-hub:
+        image: cloud-game-local
+        container_name: cloud-game-melonds-netpacket-hub
+        depends_on:
+            - coordinator
+        command: ./melonds-netpacket-hub -address :55355
+        ports:
+            - "55355:55355/udp"
+
+    worker-p1:
+        <<: *worker-common
+        container_name: cloud-game-worker-p1
         volumes:
             - ./assets/cores:/usr/local/share/cloud-game/assets/cores
             - ./assets/games:/usr/local/share/cloud-game/assets/games
+            - ./.runtime/mkds-lan/p1:/tmp/cloud-game/mkds/p1
             - x11:/tmp/.X11-unix
+        environment:
+            <<: *worker-env
+            CLOUD_GAME_WORKER_TAG: mkds-p1
+            CLOUD_GAME_WEBRTC_SINGLEPORT: "8641"
+            CLOUD_GAME_EMULATOR_STORAGE: /tmp/cloud-game/mkds/p1/save
+            CLOUD_GAME_EMULATOR_LOCALPATH: /tmp/cloud-game/mkds/p1/libretro
+            MELONDS_NETPLAY_CLIENT_ID: "1"
+            MELONDS_MAC_ADDRESS: 00:08:BF:00:00:01
+            LIBRETRO_USERNAME: mkds-p1
+        ports:
+            - "8641:8641/udp"
+        command: >
+            bash -c "while [ ! -S /tmp/.X11-unix/X99 ]; do sleep 0.1; done; ./worker -address :9000 -monitoring.port 6621 -coordinatorhost coordinator:8000 -zone mkds-p1"
+
+    worker-p2:
+        <<: *worker-common
+        container_name: cloud-game-worker-p2
+        volumes:
+            - ./assets/cores:/usr/local/share/cloud-game/assets/cores
+            - ./assets/games:/usr/local/share/cloud-game/assets/games
+            - ./.runtime/mkds-lan/p2:/tmp/cloud-game/mkds/p2
+            - x11:/tmp/.X11-unix
+        environment:
+            <<: *worker-env
+            CLOUD_GAME_WORKER_TAG: mkds-p2
+            CLOUD_GAME_WEBRTC_SINGLEPORT: "8642"
+            CLOUD_GAME_EMULATOR_STORAGE: /tmp/cloud-game/mkds/p2/save
+            CLOUD_GAME_EMULATOR_LOCALPATH: /tmp/cloud-game/mkds/p2/libretro
+            MELONDS_NETPLAY_CLIENT_ID: "2"
+            MELONDS_MAC_ADDRESS: 00:08:BF:00:00:02
+            LIBRETRO_USERNAME: mkds-p2
+        ports:
+            - "8642:8642/udp"
+        command: >
+            bash -c "while [ ! -S /tmp/.X11-unix/X99 ]; do sleep 0.1; done; ./worker -address :9000 -monitoring.port 6622 -coordinatorhost coordinator:8000 -zone mkds-p2"
+
+    worker-p3:
+        <<: *worker-common
+        container_name: cloud-game-worker-p3
+        volumes:
+            - ./assets/cores:/usr/local/share/cloud-game/assets/cores
+            - ./assets/games:/usr/local/share/cloud-game/assets/games
+            - ./.runtime/mkds-lan/p3:/tmp/cloud-game/mkds/p3
+            - x11:/tmp/.X11-unix
+        environment:
+            <<: *worker-env
+            CLOUD_GAME_WORKER_TAG: mkds-p3
+            CLOUD_GAME_WEBRTC_SINGLEPORT: "8643"
+            CLOUD_GAME_EMULATOR_STORAGE: /tmp/cloud-game/mkds/p3/save
+            CLOUD_GAME_EMULATOR_LOCALPATH: /tmp/cloud-game/mkds/p3/libretro
+            MELONDS_NETPLAY_CLIENT_ID: "3"
+            MELONDS_MAC_ADDRESS: 00:08:BF:00:00:03
+            LIBRETRO_USERNAME: mkds-p3
+        ports:
+            - "8643:8643/udp"
+        command: >
+            bash -c "while [ ! -S /tmp/.X11-unix/X99 ]; do sleep 0.1; done; ./worker -address :9000 -monitoring.port 6623 -coordinatorhost coordinator:8000 -zone mkds-p3"
+
+    worker-p4:
+        <<: *worker-common
+        container_name: cloud-game-worker-p4
+        volumes:
+            - ./assets/cores:/usr/local/share/cloud-game/assets/cores
+            - ./assets/games:/usr/local/share/cloud-game/assets/games
+            - ./.runtime/mkds-lan/p4:/tmp/cloud-game/mkds/p4
+            - x11:/tmp/.X11-unix
+        environment:
+            <<: *worker-env
+            CLOUD_GAME_WORKER_TAG: mkds-p4
+            CLOUD_GAME_WEBRTC_SINGLEPORT: "8644"
+            CLOUD_GAME_EMULATOR_STORAGE: /tmp/cloud-game/mkds/p4/save
+            CLOUD_GAME_EMULATOR_LOCALPATH: /tmp/cloud-game/mkds/p4/libretro
+            MELONDS_NETPLAY_CLIENT_ID: "4"
+            MELONDS_MAC_ADDRESS: 00:08:BF:00:00:04
+            LIBRETRO_USERNAME: mkds-p4
+        ports:
+            - "8644:8644/udp"
+        command: >
+            bash -c "while [ ! -S /tmp/.X11-unix/X99 ]; do sleep 0.1; done; ./worker -address :9000 -monitoring.port 6624 -coordinatorhost coordinator:8000 -zone mkds-p4"
 
     xvfb:
         image: kcollins/xvfb:latest

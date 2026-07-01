@@ -19,6 +19,53 @@ body {
     background-repeat: repeat;
 }
 
+html.stream-only,
+html.stream-only body {
+    background: #000;
+    height: 100%;
+    margin: 0;
+    overflow: hidden;
+    width: 100%;
+}
+
+html.stream-only #gamebody {
+    background: #000;
+    border-radius: 0;
+    display: block;
+    height: 100vh;
+    left: 0;
+    overflow: hidden;
+    position: fixed;
+    top: 0;
+    transform: none !important;
+    width: 100vw;
+}
+
+html.stream-only #gamebody > :not(#screen),
+html.stream-only .source {
+    display: none !important;
+}
+
+html.stream-only #screen {
+    border-radius: 0;
+    box-shadow: none;
+    height: 100%;
+    inset: 0;
+    position: absolute;
+    width: 100%;
+    z-index: 1;
+}
+
+html.stream-only #screen > :not(.game-screen) {
+    display: none !important;
+}
+
+html.stream-only .game-screen {
+    height: 100% !important;
+    object-fit: contain;
+    width: 100% !important;
+}
+
 #gamebody {
     display: flex;
 

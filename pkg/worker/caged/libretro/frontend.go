@@ -294,8 +294,7 @@ func (f *Frontend) Start() {
 	f.nano.LastFrameTime = time.Now()
 
 	defer func() {
-		// Save game on quit if it was saved before (shared or click-saved).
-		if f.SaveOnClose && f.HasSave() {
+		if f.SaveOnClose {
 			f.log.Debug().Msg("save on quit")
 			if err := f.Save(); err != nil {
 				f.log.Error().Err(err).Msg("save on quit failed")
@@ -306,7 +305,7 @@ func (f *Frontend) Start() {
 		close(f.doneEvt)
 	}()
 
-	if f.HasSave() {
+	if f.conf.LoadSaveOnStart && f.HasSave() {
 		// advance 1 frame for Mupen, DOSBox save states
 		// loading will work if autostart is selected for DOSBox apps
 		f.Tick()
@@ -404,7 +403,7 @@ func (f *Frontend) AudioSampleRate() int          { return f.nano.AudioSampleRat
 func (f *Frontend) FPS() float64                  { return f.nano.VideoFramerate() }
 func (f *Frontend) Flipped() bool                 { return f.nano.IsGL() }
 func (f *Frontend) FrameSize() (int, int)         { return f.nano.BaseWidth(), f.nano.BaseHeight() }
-func (f *Frontend) HasSave() bool                 { return os.Exists(f.HashPath()) }
+func (f *Frontend) HasSave() bool                 { return os.Exists(f.HashPath()) || os.Exists(f.SRAMPath()) }
 func (f *Frontend) HashPath() string              { return f.storage.GetSavePath() }
 func (f *Frontend) IsPortrait() bool              { return f.nano.IsPortrait() }
 func (f *Frontend) KbMouseSupport() bool          { return f.nano.KbMouseSupport() }
@@ -418,12 +417,39 @@ func (f *Frontend) SaveGameState() error          { return f.Save() }
 func (f *Frontend) SaveStateName() string         { return filepath.Base(f.HashPath()) }
 func (f *Frontend) Scale() (float64, string)      { return f.scale, f.scaleM }
 func (f *Frontend) SetAudioCb(cb func(app.Audio)) { f.onAudio = cb }
-func (f *Frontend) SetSessionId(name string)      { f.storage.SetMainSaveName(name) }
+func (f *Frontend) SetSessionId(name string) {
+	f.storage.SetMainSaveName(name)
+	f.nano.SetNetpacketRoom(netpacketRoomFromSessionID(name))
+}
 func (f *Frontend) SetDataCb(cb func([]byte))     { f.onData = cb }
 func (f *Frontend) SetVideoCb(ff func(app.Video)) { f.onVideo = ff }
 func (f *Frontend) Tick()                         { f.mu.Lock(); f.nano.Run(); f.mu.Unlock() }
 func (f *Frontend) ViewportRecalculate()          { f.mu.Lock(); f.vw, f.vh = f.ViewportCalc(); f.mu.Unlock() }
 func (f *Frontend) ViewportSize() (int, int)      { return f.vw, f.vh }
+
+func netpacketRoomFromSessionID(name string) string {
+	group := name
+	if base, _, ok := strings.Cut(name, "___"); ok {
+		group = base
+	}
+
+	idx := strings.LastIndex(group, "-p")
+	if idx < 0 || idx == 0 || idx+2 >= len(group) {
+		return group
+	}
+
+	prefix := group[:idx]
+	suffix := group[idx+2:]
+	if strings.Contains(suffix, "-") {
+		return group
+	}
+	for _, r := range suffix {
+		if r < '0' || r > '9' {
+			return group
+		}
+	}
+	return prefix
+}
 
 func (f *Frontend) Input(port int, device byte, data []byte) {
 	switch Device(device) {
@@ -489,8 +515,10 @@ func (f *Frontend) Save() error {
 	if err != nil {
 		return err
 	}
-	if err := f.storage.Save(f.HashPath(), ss); err != nil {
-		return err
+	if len(ss) > 0 {
+		if err := f.storage.Save(f.HashPath(), ss); err != nil {
+			return err
+		}
 	}
 	ss = nil
 
@@ -512,8 +540,10 @@ func (f *Frontend) Load() error {
 	if err != nil && !errors.Is(err, os.ErrNotExist) {
 		return err
 	}
-	if err := nanoarch.RestoreSaveState(ss); err != nil {
-		return err
+	if len(ss) > 0 {
+		if err := nanoarch.RestoreSaveState(ss); err != nil {
+			return err
+		}
 	}
 
 	sram, err := f.storage.Load(f.SRAMPath())

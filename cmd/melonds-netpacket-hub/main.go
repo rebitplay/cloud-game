@@ -5,6 +5,7 @@ import (
 	"flag"
 	"log"
 	"net"
+	"sort"
 	"sync"
 	"time"
 )
@@ -35,6 +36,16 @@ type peer struct {
 	seen time.Time
 }
 
+type roomStats struct {
+	rxPackets        uint64
+	rxBytes          uint64
+	controlPackets   uint64
+	broadcastPackets uint64
+	directPackets    uint64
+	forwardedPackets uint64
+	forwardedBytes   uint64
+}
+
 func main() {
 	addr := flag.String("address", defaultAddress, "UDP listen address")
 	flag.Parse()
@@ -53,8 +64,10 @@ func main() {
 	log.Printf("melonDS netpacket hub listening on %s", conn.LocalAddr())
 
 	var (
-		mu    sync.Mutex
-		peers = map[peerKey]peer{}
+		mu      sync.Mutex
+		peers   = map[peerKey]peer{}
+		stats   = map[uint64]*roomStats{}
+		lastLog = map[uint64]time.Time{}
 	)
 
 	go func() {
@@ -87,7 +100,29 @@ func main() {
 
 		now := time.Now()
 		mu.Lock()
-		peers[peerKey{room: p.room, id: p.src}] = peer{addr: srcAddr, seen: now}
+		key := peerKey{room: p.room, id: p.src}
+		oldPeer, knownPeer := peers[key]
+		peers[key] = peer{addr: srcAddr, seen: now}
+		if !knownPeer || oldPeer.addr.String() != srcAddr.String() {
+			log.Printf("peer room=%x id=%d addr=%s known=%v", p.room, p.src, srcAddr, knownPeer)
+		}
+
+		rs := stats[p.room]
+		if rs == nil {
+			rs = &roomStats{}
+			stats[p.room] = rs
+		}
+		if len(p.data) == 0 {
+			rs.controlPackets++
+		} else {
+			rs.rxPackets++
+			rs.rxBytes += uint64(len(p.data))
+			if p.dst == broadcastID {
+				rs.broadcastPackets++
+			} else {
+				rs.directPackets++
+			}
+		}
 
 		var targets []*net.UDPAddr
 		if len(p.data) > 0 {
@@ -100,6 +135,22 @@ func main() {
 				}
 				targets = append(targets, peer.addr)
 			}
+			rs.forwardedPackets += uint64(len(targets))
+			rs.forwardedBytes += uint64(len(targets) * len(p.data))
+		}
+		shouldLog := now.Sub(lastLog[p.room]) >= time.Second
+		var snapshot roomStats
+		var peerIDs []int
+		if shouldLog {
+			snapshot = *rs
+			*rs = roomStats{}
+			lastLog[p.room] = now
+			for key := range peers {
+				if key.room == p.room {
+					peerIDs = append(peerIDs, int(key.id))
+				}
+			}
+			sort.Ints(peerIDs)
 		}
 		mu.Unlock()
 
@@ -107,6 +158,20 @@ func main() {
 			if _, err := conn.WriteToUDP(buf[:n], target); err != nil {
 				log.Printf("forward room=%x src=%d dst=%d to=%s: %v", p.room, p.src, p.dst, target, err)
 			}
+		}
+		if shouldLog {
+			log.Printf(
+				"stats room=%x peers=%v rx=%d rx_bytes=%d control=%d broadcast=%d direct=%d forwarded=%d forwarded_bytes=%d",
+				p.room,
+				peerIDs,
+				snapshot.rxPackets,
+				snapshot.rxBytes,
+				snapshot.controlPackets,
+				snapshot.broadcastPackets,
+				snapshot.directPackets,
+				snapshot.forwardedPackets,
+				snapshot.forwardedBytes,
+			)
 		}
 	}
 }

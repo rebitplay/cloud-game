@@ -26,7 +26,11 @@ const init = (roomId, wid, zone) => {
 };
 
 const send = (data) => {
-    if (conn.readyState === 1) conn.send(JSON.stringify(data));
+    if (conn?.readyState === WebSocket.OPEN) conn.send(JSON.stringify(data));
+};
+
+const close = () => {
+    if (conn && conn.readyState < WebSocket.CLOSING) conn.close();
 };
 
 /**
@@ -35,6 +39,7 @@ const send = (data) => {
  *  Needs init() call.
  */
 export const socket = {
+    close,
     init,
     send,
 };

@@ -8,6 +8,7 @@ COORDINATOR_ADDR="${COORDINATOR_ADDR:-:8020}"
 COORDINATOR_HOST="${COORDINATOR_HOST:-127.0.0.1:8020}"
 HUB_ADDR="${HUB_ADDR:-127.0.0.1:55355}"
 ROOM="${ROOM:-mkds-demo}"
+GAME="${GAME:-Mario-Kart-DS-USA}"
 RUNTIME_DIR="${RUNTIME_DIR:-$ROOT/.runtime/mkds-lan}"
 PLAYER_COUNT="${PLAYER_COUNT:-4}"
 WORKER1_ADDR="${WORKER1_ADDR:-:9021}"
@@ -81,6 +82,7 @@ fi
 for slot in $(seq 1 "$PLAYER_COUNT"); do
     addr_var="WORKER${slot}_ADDR"
     worker_addr="${!addr_var}"
+    printf -v mac_address '00:08:BF:00:00:%02X' "$slot"
     start "worker-p${slot}" env \
         "${worker_env[@]}" \
         CLOUD_GAME_WORKER_TAG="mkds-p${slot}" \
@@ -89,15 +91,17 @@ for slot in $(seq 1 "$PLAYER_COUNT"); do
         MELONDS_NETPLAY_HUB="$HUB_ADDR" \
         MELONDS_NETPLAY_ROOM="$ROOM" \
         MELONDS_NETPLAY_CLIENT_ID="$slot" \
+        MELONDS_MAC_ADDRESS="$mac_address" \
+        LIBRETRO_USERNAME="mkds-p${slot}" \
         ./bin/worker -address "$worker_addr" -monitoring.port "$((6620 + slot))" -coordinatorhost "$COORDINATOR_HOST" -zone "mkds-p${slot}"
 done
 
 cat <<EOF
 
-Mario Kart DS LAN demo is starting with ${PLAYER_COUNT} player worker(s).
+NDS LAN demo is starting with ${PLAYER_COUNT} player worker(s).
 
 Open:
-  http://fedora${COORDINATOR_ADDR}/mkds-lan.html?room=${ROOM}&players=${PLAYER_COUNT}
+  http://fedora${COORDINATOR_ADDR}/mkds-lan.html?room=${ROOM}&players=${PLAYER_COUNT}&game=${GAME}
 
 If remote WebRTC ICE fails over Tailscale, restart with:
   PUBLIC_ADDRESS=fedora ICE_IP_MAP=<tailscale-ip> $0

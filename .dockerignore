@@ -3,6 +3,13 @@
 !pkg/
 !scripts/
 !web/
+!assets/
+assets/**
+!assets/cores/
+!assets/cores/melondsds_libretro.so
+!assets/games/
+!assets/games/nds/
+!assets/games/nds/Tetris-DS-(USA).nds
 !go.mod
 !go.sum
 !LICENSE
