@@ -94,7 +94,7 @@ func main() {
 		}
 
 		p, ok := decode(buf[:n])
-		if !ok || p.src == 0 || p.src == broadcastID {
+		if !ok || !validPeerID(p.src) {
 			continue
 		}
 
@@ -174,6 +174,10 @@ func main() {
 			)
 		}
 	}
+}
+
+func validPeerID(id uint16) bool {
+	return id != broadcastID
 }
 
 func decode(raw []byte) (packet, bool) {

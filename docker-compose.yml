@@ -56,7 +56,7 @@ services:
             CLOUD_GAME_WEBRTC_SINGLEPORT: "8641"
             CLOUD_GAME_EMULATOR_STORAGE: /tmp/cloud-game/mkds/p1/save
             CLOUD_GAME_EMULATOR_LOCALPATH: /tmp/cloud-game/mkds/p1/libretro
-            MELONDS_NETPLAY_CLIENT_ID: "1"
+            MELONDS_NETPLAY_CLIENT_ID: "0"
             MELONDS_MAC_ADDRESS: 00:08:BF:00:00:01
             LIBRETRO_USERNAME: mkds-p1
         ports:
@@ -78,7 +78,7 @@ services:
             CLOUD_GAME_WEBRTC_SINGLEPORT: "8642"
             CLOUD_GAME_EMULATOR_STORAGE: /tmp/cloud-game/mkds/p2/save
             CLOUD_GAME_EMULATOR_LOCALPATH: /tmp/cloud-game/mkds/p2/libretro
-            MELONDS_NETPLAY_CLIENT_ID: "2"
+            MELONDS_NETPLAY_CLIENT_ID: "1"
             MELONDS_MAC_ADDRESS: 00:08:BF:00:00:02
             LIBRETRO_USERNAME: mkds-p2
         ports:
@@ -100,7 +100,7 @@ services:
             CLOUD_GAME_WEBRTC_SINGLEPORT: "8643"
             CLOUD_GAME_EMULATOR_STORAGE: /tmp/cloud-game/mkds/p3/save
             CLOUD_GAME_EMULATOR_LOCALPATH: /tmp/cloud-game/mkds/p3/libretro
-            MELONDS_NETPLAY_CLIENT_ID: "3"
+            MELONDS_NETPLAY_CLIENT_ID: "2"
             MELONDS_MAC_ADDRESS: 00:08:BF:00:00:03
             LIBRETRO_USERNAME: mkds-p3
         ports:
@@ -122,7 +122,7 @@ services:
             CLOUD_GAME_WEBRTC_SINGLEPORT: "8644"
             CLOUD_GAME_EMULATOR_STORAGE: /tmp/cloud-game/mkds/p4/save
             CLOUD_GAME_EMULATOR_LOCALPATH: /tmp/cloud-game/mkds/p4/libretro
-            MELONDS_NETPLAY_CLIENT_ID: "4"
+            MELONDS_NETPLAY_CLIENT_ID: "3"
             MELONDS_MAC_ADDRESS: 00:08:BF:00:00:04
             LIBRETRO_USERNAME: mkds-p4
         ports:

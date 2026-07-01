@@ -82,6 +82,7 @@ fi
 for slot in $(seq 1 "$PLAYER_COUNT"); do
     addr_var="WORKER${slot}_ADDR"
     worker_addr="${!addr_var}"
+    netplay_client_id=$((slot - 1))
     printf -v mac_address '00:08:BF:00:00:%02X' "$slot"
     start "worker-p${slot}" env \
         "${worker_env[@]}" \
@@ -90,7 +91,7 @@ for slot in $(seq 1 "$PLAYER_COUNT"); do
         CLOUD_GAME_EMULATOR_LOCALPATH="$RUNTIME_DIR/p${slot}/libretro" \
         MELONDS_NETPLAY_HUB="$HUB_ADDR" \
         MELONDS_NETPLAY_ROOM="$ROOM" \
-        MELONDS_NETPLAY_CLIENT_ID="$slot" \
+        MELONDS_NETPLAY_CLIENT_ID="$netplay_client_id" \
         MELONDS_MAC_ADDRESS="$mac_address" \
         LIBRETRO_USERNAME="mkds-p${slot}" \
         ./bin/worker -address "$worker_addr" -monitoring.port "$((6620 + slot))" -coordinatorhost "$COORDINATOR_HOST" -zone "mkds-p${slot}"

@@ -92,7 +92,7 @@ func (n *Nanoarch) startNetpacketFromEnv() {
 
 	idRaw := firstEnv("MELONDS_NETPLAY_CLIENT_ID", "REBIT_MELONDS_NETPLAY_CLIENT_ID")
 	id, err := strconv.ParseUint(idRaw, 10, 16)
-	if err != nil || id == 0 || id == uint64(netpacketBroadcast) {
+	if err != nil || id == uint64(netpacketBroadcast) {
 		n.log.Error().Str("client_id", idRaw).Msg("invalid melonDS netplay client id")
 		return
 	}

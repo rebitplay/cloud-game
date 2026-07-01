@@ -75,6 +75,7 @@ for slot in $(seq 1 "$PLAYER_COUNT"); do
     webrtc_port=$((WEBRTC_BASE_PORT + slot))
     save_dir="${RUNTIME_DIR}/p${slot}/save"
     local_dir="${RUNTIME_DIR}/p${slot}/libretro"
+    netplay_client_id=$((slot - 1))
     printf -v mac_address '00:08:BF:00:00:%02X' "$slot"
 
     start_env "worker-p${slot}" \
@@ -90,7 +91,7 @@ for slot in $(seq 1 "$PLAYER_COUNT"); do
         CLOUD_GAME_EMULATOR_LOCALPATH="$local_dir" \
         MELONDS_NETPLAY_HUB="$HUB_ADDR" \
         MELONDS_NETPLAY_ROOM="$ROOM" \
-        MELONDS_NETPLAY_CLIENT_ID="$slot" \
+        MELONDS_NETPLAY_CLIENT_ID="$netplay_client_id" \
         MELONDS_MAC_ADDRESS="$mac_address" \
         LIBRETRO_USERNAME="mkds-p${slot}" \
         ./worker -address ":${worker_port}" -monitoring.port "$monitoring_port" -coordinatorhost "$COORDINATOR_HOST" -zone "mkds-p${slot}"
