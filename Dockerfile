@@ -153,7 +153,6 @@ RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
     liborc-0.4-0 \
     libx11-6 \
     libxext6 && \
-    apt-get autoremove && \
     rm -rf /var/lib/apt/lists/* /var/log/* /usr/share/bug /usr/share/doc /usr/share/doc-base \
     /usr/share/X11/locale/*
 
@@ -188,7 +187,6 @@ RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
     --mount=type=cache,target=/var/lib/apt,sharing=locked \
     apt-get -q update && apt-get -q install --no-install-recommends -y \
     xvfb && \
-    apt-get autoremove && \
     rm -rf /var/lib/apt/lists/* /var/log/* /usr/share/bug /usr/share/doc /usr/share/doc-base
 
 COPY assets/cores/melondsds_libretro.so ./assets/cores/
