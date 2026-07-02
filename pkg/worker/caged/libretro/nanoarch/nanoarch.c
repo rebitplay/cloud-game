@@ -189,6 +189,25 @@ void bridge_netpacket_receive(struct retro_netpacket_callback *cb, const void *b
     }
 }
 
+void bridge_netpacket_poll(struct retro_netpacket_callback *cb) {
+    if (cb && cb->poll) {
+        cb->poll();
+    }
+}
+
+bool bridge_netpacket_connected(struct retro_netpacket_callback *cb, uint16_t client_id) {
+    if (cb && cb->connected) {
+        return cb->connected(client_id);
+    }
+    return true;
+}
+
+void bridge_netpacket_disconnected(struct retro_netpacket_callback *cb, uint16_t client_id) {
+    if (cb && cb->disconnected) {
+        cb->disconnected(client_id);
+    }
+}
+
 void bridge_netpacket_stop(struct retro_netpacket_callback *cb) {
     if (cb && cb->stop) {
         cb->stop();

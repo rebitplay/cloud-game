@@ -1,0 +1,57 @@
+package coordinator
+
+import (
+	"encoding/binary"
+	"encoding/json"
+	"strings"
+	"testing"
+)
+
+func TestRewriteCandidateJSON(t *testing.T) {
+	raw := `{"candidate":"candidate:123 1 udp 2122260223 10.0.0.2 8701 typ host","sdpMid":"0","sdpMLineIndex":0,"usernameFragment":"worker123"}`
+
+	rewritten := rewriteCandidateJSON(raw, "203.0.113.10", 8641)
+
+	var payload map[string]any
+	if err := json.Unmarshal([]byte(rewritten), &payload); err != nil {
+		t.Fatalf("candidate json: %v", err)
+	}
+	if got := payload["candidate"].(string); got != "candidate:123 1 udp 2122260223 203.0.113.10 8641 typ host" {
+		t.Fatalf("candidate mismatch: %q", got)
+	}
+	if got := candidateJSONUfrag(rewritten); got != "worker123" {
+		t.Fatalf("ufrag mismatch: %q", got)
+	}
+}
+
+func TestRewriteRTCSessionSDP(t *testing.T) {
+	raw := `{"type":"offer","sdp":"v=0\r\na=ice-ufrag:worker123\r\na=candidate:123 1 udp 2122260223 10.0.0.2 8701 typ host\r\na=end-of-candidates\r\n"}`
+
+	rewritten, ufrag := rewriteRTCSessionSDP(raw, "203.0.113.10", 8641)
+	if ufrag != "worker123" {
+		t.Fatalf("ufrag mismatch: %q", ufrag)
+	}
+	if !strings.Contains(rewritten, "candidate:123 1 udp 2122260223 203.0.113.10 8641 typ host") {
+		t.Fatalf("candidate was not rewritten: %s", rewritten)
+	}
+}
+
+func TestStunUsername(t *testing.T) {
+	username := "worker123:browser456"
+	packet := make([]byte, 20+4+len(username))
+	binary.BigEndian.PutUint16(packet[0:2], 0x0001)
+	binary.BigEndian.PutUint16(packet[2:4], uint16(4+len(username)))
+	binary.BigEndian.PutUint32(packet[4:8], stunMagicCookie)
+	binary.BigEndian.PutUint16(packet[20:22], stunAttrUsername)
+	binary.BigEndian.PutUint16(packet[22:24], uint16(len(username)))
+	copy(packet[24:], username)
+
+	got, ok := stunUsername(packet)
+	if !ok || got != username {
+		t.Fatalf("username mismatch: %q ok=%v", got, ok)
+	}
+	first, second := splitICEUsername(got)
+	if first != "worker123" || second != "browser456" {
+		t.Fatalf("split mismatch: %q %q", first, second)
+	}
+}

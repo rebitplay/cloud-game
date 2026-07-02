@@ -2,18 +2,28 @@ package coordinator
 
 import "github.com/giongto35/cloud-game/v3/pkg/api"
 
-func (w *Worker) HandleRegisterRoom(rq api.RegisterRoomRequest) { w.RoomId = string(rq) }
+func (w *Worker) HandleRegisterRoom(rq api.RegisterRoomRequest) {
+	w.RoomId = string(rq)
+	if w.ReservedRoomId == w.RoomId {
+		w.ReservedRoomId = ""
+	}
+}
 
 func (w *Worker) HandleCloseRoom(rq api.CloseRoomRequest) {
 	if string(rq) == w.RoomId {
 		w.RoomId = ""
+		w.ReservedRoomId = ""
 		w.FreeSlots()
 	}
 }
 
 func (w *Worker) HandleIceCandidate(rq api.WebrtcSignalRequest, users HasUserRegistry) error {
 	if usr := users.Find(rq.Id); usr != nil {
-		usr.SendWebrtcIceCandidate(*rq.Ice)
+		ice := *rq.Ice
+		if w.rtcMux != nil {
+			ice = w.rtcMux.rewriteWorkerICE(rq.Id, w, ice)
+		}
+		usr.SendWebrtcIceCandidate(ice)
 	} else {
 		w.log.Warn().Str("id", rq.Id).Msg("unknown session")
 	}

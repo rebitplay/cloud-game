@@ -62,3 +62,11 @@ func (w *Worker) RecordGame(id string, rec bool, recUser string) (*api.RecordGam
 func (w *Worker) TerminateSession(id string) {
 	_, _ = w.Send(api.TerminateSession, api.TerminateSessionRequest{Id: id})
 }
+
+func (w *Worker) InstallNDSRom(req api.NDSRomInstallRequest) (*api.NDSRomInstallResponse, error) {
+	return api.UnwrapChecked[api.NDSRomInstallResponse](w.Send(api.NDSRomInstall, req))
+}
+
+func (w *Worker) PrepareNDSSession(req api.NDSSessionPrepareRequest) (*string, error) {
+	return api.UnwrapChecked[string](w.Send(api.NDSSessionPrepare, req))
+}

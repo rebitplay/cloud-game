@@ -15,6 +15,7 @@ const (
 	maxPacketSize  = headerLen + 60*1024
 	defaultAddress = "127.0.0.1:55355"
 	broadcastID    = 0xffff
+	presenceFlag   = 1 << 31
 )
 
 var magic = [4]byte{'R', 'N', 'P', '1'}
@@ -25,10 +26,11 @@ type peerKey struct {
 }
 
 type packet struct {
-	room uint64
-	src  uint16
-	dst  uint16
-	data []byte
+	room  uint64
+	src   uint16
+	dst   uint16
+	flags uint32
+	data  []byte
 }
 
 type peer struct {
@@ -125,7 +127,11 @@ func main() {
 		}
 
 		var targets []*net.UDPAddr
-		if len(p.data) > 0 {
+		if len(p.data) == 0 && p.flags&presenceFlag != 0 && p.src != 0 {
+			if host, ok := peers[peerKey{room: p.room, id: 0}]; ok {
+				targets = append(targets, host.addr)
+			}
+		} else if len(p.data) > 0 {
 			for key, peer := range peers {
 				if key.room != p.room || key.id == p.src {
 					continue
@@ -135,9 +141,9 @@ func main() {
 				}
 				targets = append(targets, peer.addr)
 			}
-			rs.forwardedPackets += uint64(len(targets))
-			rs.forwardedBytes += uint64(len(targets) * len(p.data))
 		}
+		rs.forwardedPackets += uint64(len(targets))
+		rs.forwardedBytes += uint64(len(targets) * len(p.data))
 		shouldLog := now.Sub(lastLog[p.room]) >= time.Second
 		var snapshot roomStats
 		var peerIDs []int
@@ -191,9 +197,10 @@ func decode(raw []byte) (packet, bool) {
 	}
 
 	return packet{
-		room: binary.LittleEndian.Uint64(raw[4:12]),
-		src:  binary.LittleEndian.Uint16(raw[12:14]),
-		dst:  binary.LittleEndian.Uint16(raw[14:16]),
-		data: raw[headerLen : headerLen+payloadLen],
+		room:  binary.LittleEndian.Uint64(raw[4:12]),
+		src:   binary.LittleEndian.Uint16(raw[12:14]),
+		dst:   binary.LittleEndian.Uint16(raw[14:16]),
+		flags: binary.LittleEndian.Uint32(raw[16:20]),
+		data:  raw[headerLen : headerLen+payloadLen],
 	}, true
 }

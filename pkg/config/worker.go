@@ -33,7 +33,11 @@ type Storage struct {
 type Worker struct {
 	Debug      bool
 	Monitoring Monitoring
-	Network    struct {
+	NDS        struct {
+		Group  string
+		Player int
+	}
+	Network struct {
 		CoordinatorAddress string
 		Endpoint           string
 		PingEndpoint       string

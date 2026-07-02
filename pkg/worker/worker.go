@@ -3,6 +3,7 @@ package worker
 import (
 	"errors"
 	"fmt"
+	"sync"
 
 	"github.com/giongto35/cloud-game/v3/pkg/config"
 	"github.com/giongto35/cloud-game/v3/pkg/games"
@@ -24,6 +25,10 @@ type Worker struct {
 	log      *logger.Logger
 	mana     *caged.Manager
 	router   *room.GameRouter
+	prepared struct {
+		mu       sync.RWMutex
+		sessions map[string]struct{}
+	}
 	services [2]interface {
 		Run()
 		Stop() error
@@ -48,6 +53,7 @@ func New(conf config.WorkerConfig, log *logger.Logger) (*Worker, error) {
 		mana:     manager,
 		router:   room.NewGameRouter(),
 	}
+	worker.prepared.sessions = map[string]struct{}{}
 
 	h, err := httpx.NewServer(
 		conf.Worker.GetAddr(),
@@ -112,7 +118,7 @@ func (w *Worker) Start(done chan struct{}) {
 				return
 			default:
 				w.Reset()
-				cord, err := newCoordinatorConnection(remoteAddr, w.conf.Worker, w.address, w.log)
+				cord, err := newCoordinatorConnection(remoteAddr, w.conf.Worker, w.conf.Webrtc.SinglePort, w.address, w.log)
 				if err != nil {
 					onRetryFail(err)
 					continue

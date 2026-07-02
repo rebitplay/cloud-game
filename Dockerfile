@@ -189,7 +189,7 @@ RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
     xvfb && \
     rm -rf /var/lib/apt/lists/* /var/log/* /usr/share/bug /usr/share/doc /usr/share/doc-base
 
-COPY assets/cores/melondsds_libretro.so ./assets/cores/
+COPY assets/cores/melondslan_libretro.so ./assets/cores/
 COPY assets/games/nds/Tetris-DS-(USA).nds ./assets/games/nds/
 COPY scripts/bunny-entrypoint.sh ./bunny-entrypoint.sh
 

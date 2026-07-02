@@ -1,0 +1,8 @@
+./coordinator.go
+./emulator.go
+./loader.go
+./shared.go
+./webrtc.go
+./worker.go
+./emulator_test.go
+./loader_test.go

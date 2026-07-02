@@ -39,6 +39,9 @@ func (u *User) Bind(w *Worker) bool {
 func (u *User) Disconnect() {
 	u.Connection.Disconnect()
 	if u.w != nil {
+		if u.w.rtcMux != nil {
+			u.w.rtcMux.unregisterSession(u.Id().String())
+		}
 		u.w.TerminateSession(u.Id().String())
 	}
 }

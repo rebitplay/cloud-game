@@ -445,6 +445,7 @@ func (n *Nanoarch) syncInputToCache() {
 
 func (n *Nanoarch) Run() {
 	n.syncInputToCache()
+	n.pollNetpacket()
 
 	if n.LibCo {
 		C.same_thread(retroRun)
@@ -550,7 +551,7 @@ const (
 
 // SaveState returns emulator internal state.
 func SaveState() (State, error) {
-	size := C.bridge_retro_serialize_size(retroSerializeSize)
+	size := Nan0.serializeSize
 	if size == 0 {
 		return nil, nil
 	}

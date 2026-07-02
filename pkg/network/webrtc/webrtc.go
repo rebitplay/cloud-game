@@ -22,7 +22,9 @@ type Peer struct {
 	v *webrtc.TrackLocalStaticSample
 	d *webrtc.DataChannel
 
-	onMessage func(data []byte)
+	onMessage        func(data []byte)
+	signalMu         sync.Mutex
+	pendingRemoteICE []webrtc.ICECandidateInit
 }
 
 var samplePool sync.Pool
@@ -150,7 +152,7 @@ func (p *Peer) HandleSignal(ice, sdp *string) error {
 			return err
 		}
 		p.log.Debug().Str("remote", candidate.Candidate).Msg("rtc [ice] candidate")
-		return p.c.AddICECandidate(candidate)
+		return p.addRemoteICE(candidate)
 	}
 	if sdp != nil {
 		answer, err := fromJson[webrtc.SessionDescription](*sdp)
@@ -158,8 +160,39 @@ func (p *Peer) HandleSignal(ice, sdp *string) error {
 			return err
 		}
 		p.log.Debug().Str("type", answer.Type.String()).Msg("rtc [sdp] (remote)")
-		return p.c.SetRemoteDescription(answer)
+		return p.setRemoteDescription(answer)
 	}
+	return nil
+}
+
+func (p *Peer) addRemoteICE(candidate webrtc.ICECandidateInit) error {
+	p.signalMu.Lock()
+	defer p.signalMu.Unlock()
+
+	if p.c.RemoteDescription() == nil {
+		p.pendingRemoteICE = append(p.pendingRemoteICE, candidate)
+		p.log.Debug().Int("pending", len(p.pendingRemoteICE)).Msg("rtc [ice] remote candidate buffered")
+		return nil
+	}
+	return p.c.AddICECandidate(candidate)
+}
+
+func (p *Peer) setRemoteDescription(sdp webrtc.SessionDescription) error {
+	p.signalMu.Lock()
+	defer p.signalMu.Unlock()
+
+	if err := p.c.SetRemoteDescription(sdp); err != nil {
+		return err
+	}
+	for _, candidate := range p.pendingRemoteICE {
+		if err := p.c.AddICECandidate(candidate); err != nil {
+			return err
+		}
+	}
+	if len(p.pendingRemoteICE) > 0 {
+		p.log.Debug().Int("flushed", len(p.pendingRemoteICE)).Msg("rtc [ice] remote candidate buffer flushed")
+	}
+	p.pendingRemoteICE = nil
 	return nil
 }
 

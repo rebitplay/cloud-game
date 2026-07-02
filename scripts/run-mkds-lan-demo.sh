@@ -10,19 +10,44 @@ HUB_ADDR="${HUB_ADDR:-127.0.0.1:55355}"
 ROOM="${ROOM:-mkds-demo}"
 GAME="${GAME:-Mario-Kart-DS-USA}"
 RUNTIME_DIR="${RUNTIME_DIR:-$ROOT/.runtime/mkds-lan}"
-PLAYER_COUNT="${PLAYER_COUNT:-4}"
-WORKER1_ADDR="${WORKER1_ADDR:-:9021}"
-WORKER2_ADDR="${WORKER2_ADDR:-:9022}"
-WORKER3_ADDR="${WORKER3_ADDR:-:9023}"
-WORKER4_ADDR="${WORKER4_ADDR:-:9024}"
+ROOM_COUNT="${ROOM_COUNT:-${NDS_ROOM_COUNT:-0}}"
+NDS_MAX_ROOM_COUNT="${NDS_MAX_ROOM_COUNT:-8}"
+NDS_AUTO_SPAWN="${NDS_AUTO_SPAWN:-true}"
+PLAYER_COUNT="${PLAYER_COUNT:-${NDS_PLAYERS_PER_ROOM:-4}}"
+WORKER_BASE_PORT="${WORKER_BASE_PORT:-9020}"
+WEBRTC_MUX_ENABLED="${WEBRTC_MUX_ENABLED:-true}"
+WEBRTC_PUBLIC_PORT="${WEBRTC_PUBLIC_PORT:-8641}"
+if [[ "${WEBRTC_MUX_ENABLED,,}" == "true" || "${WEBRTC_MUX_ENABLED}" == "1" || "${WEBRTC_MUX_ENABLED,,}" == "yes" || "${WEBRTC_MUX_ENABLED,,}" == "on" ]]; then
+    WEBRTC_BASE_PORT="${WEBRTC_WORKER_BASE_PORT:-${WEBRTC_BASE_PORT:-8720}}"
+else
+    WEBRTC_BASE_PORT="${WEBRTC_WORKER_BASE_PORT:-${WEBRTC_BASE_PORT:-8640}}"
+fi
 PUBLIC_ADDRESS="${PUBLIC_ADDRESS:-}"
 ICE_IP_MAP="${ICE_IP_MAP:-}"
 INCLUDE_LOOPBACK="${INCLUDE_LOOPBACK:-false}"
+
+if (( ROOM_COUNT < 0 )); then
+    echo "ROOM_COUNT must be 0 or greater" >&2
+    exit 1
+fi
+
+if (( NDS_MAX_ROOM_COUNT < 1 )); then
+    echo "NDS_MAX_ROOM_COUNT must be at least 1" >&2
+    exit 1
+fi
 
 if (( PLAYER_COUNT < 1 || PLAYER_COUNT > 4 )); then
     echo "PLAYER_COUNT must be between 1 and 4" >&2
     exit 1
 fi
+
+if (( ROOM_COUNT > NDS_MAX_ROOM_COUNT )); then
+    echo "ROOM_COUNT cannot exceed NDS_MAX_ROOM_COUNT" >&2
+    exit 1
+fi
+
+TOTAL_WORKERS=$((ROOM_COUNT * PLAYER_COUNT))
+MAX_WORKERS=$((NDS_MAX_ROOM_COUNT * PLAYER_COUNT))
 
 mkdir -p "$RUNTIME_DIR/logs"
 
@@ -63,6 +88,20 @@ start hub ./bin/melonds-netpacket-hub -address "$HUB_ADDR"
 start coordinator env \
     CLOUD_GAME_COORDINATOR_DEBUG=true \
     CLOUD_GAME_COORDINATOR_SERVER_CACHECONTROL=no-store \
+    COORDINATOR_HOST="$COORDINATOR_HOST" \
+    HUB_ADDR="$HUB_ADDR" \
+    NDS_AUTO_SPAWN="$NDS_AUTO_SPAWN" \
+    NDS_MAX_ROOM_COUNT="$NDS_MAX_ROOM_COUNT" \
+    NDS_PLAYERS_PER_ROOM="$PLAYER_COUNT" \
+    ROOM_COUNT="$ROOM_COUNT" \
+    RUNTIME_DIR="$RUNTIME_DIR" \
+    WEBRTC_BASE_PORT="$WEBRTC_BASE_PORT" \
+    WEBRTC_MUX_ENABLED="$WEBRTC_MUX_ENABLED" \
+    WEBRTC_PUBLIC_PORT="$WEBRTC_PUBLIC_PORT" \
+    WEBRTC_PUBLIC_IP="${WEBRTC_PUBLIC_IP:-$ICE_IP_MAP}" \
+    WEBRTC_WORKER_BASE_PORT="$WEBRTC_BASE_PORT" \
+    WORKER_BASE_PORT="$WORKER_BASE_PORT" \
+    MONITORING_BASE_PORT=6620 \
     ./bin/coordinator -address "$COORDINATOR_ADDR"
 
 sleep 1
@@ -79,27 +118,43 @@ if [[ -n "$ICE_IP_MAP" ]]; then
     worker_env+=("CLOUD_GAME_WEBRTC_ICEIPMAP=$ICE_IP_MAP")
 fi
 
-for slot in $(seq 1 "$PLAYER_COUNT"); do
-    addr_var="WORKER${slot}_ADDR"
-    worker_addr="${!addr_var}"
-    netplay_client_id=$((slot - 1))
-    printf -v mac_address '00:08:BF:00:00:%02X' "$slot"
-    start "worker-p${slot}" env \
-        "${worker_env[@]}" \
-        CLOUD_GAME_WORKER_TAG="mkds-p${slot}" \
-        CLOUD_GAME_EMULATOR_STORAGE="$RUNTIME_DIR/p${slot}/save" \
-        CLOUD_GAME_EMULATOR_LOCALPATH="$RUNTIME_DIR/p${slot}/libretro" \
-        MELONDS_NETPLAY_HUB="$HUB_ADDR" \
-        MELONDS_NETPLAY_ROOM="$ROOM" \
-        MELONDS_NETPLAY_CLIENT_ID="$netplay_client_id" \
-        MELONDS_MAC_ADDRESS="$mac_address" \
-        LIBRETRO_USERNAME="mkds-p${slot}" \
-        ./bin/worker -address "$worker_addr" -monitoring.port "$((6620 + slot))" -coordinatorhost "$COORDINATOR_HOST" -zone "mkds-p${slot}"
-done
+global_slot=0
+if (( ROOM_COUNT > 0 )); then
+    for group in $(seq 1 "$ROOM_COUNT"); do
+        if (( ROOM_COUNT == 1 )); then
+            group_name="mkds"
+        else
+            group_name="mkds-r${group}"
+        fi
+
+        for player in $(seq 1 "$PLAYER_COUNT"); do
+            global_slot=$((global_slot + 1))
+            worker_addr=":$((WORKER_BASE_PORT + global_slot))"
+            netplay_client_id=$((player - 1))
+            zone="${group_name}-p${player}"
+            printf -v mac_address '00:08:BF:%02X:00:%02X' "$group" "$player"
+            start "worker-${zone}" env \
+                "${worker_env[@]}" \
+                CLOUD_GAME_WORKER_TAG="$zone" \
+                CLOUD_GAME_WORKER_NDS_GROUP="$group_name" \
+                CLOUD_GAME_WORKER_NDS_PLAYER="$player" \
+                CLOUD_GAME_EMULATOR_STORAGE="$RUNTIME_DIR/${group_name}/p${player}/save" \
+                CLOUD_GAME_EMULATOR_LOCALPATH="$RUNTIME_DIR/${group_name}/p${player}/libretro" \
+                MELONDS_NETPLAY_HUB="$HUB_ADDR" \
+                MELONDS_NETPLAY_ROOM="$ROOM" \
+                MELONDS_NETPLAY_CLIENT_ID="$netplay_client_id" \
+                MELONDS_MAC_ADDRESS="$mac_address" \
+                LIBRETRO_USERNAME="$zone" \
+                ./bin/worker -address "$worker_addr" -monitoring.port "$((6620 + global_slot))" -coordinatorhost "$COORDINATOR_HOST" -zone "$zone"
+        done
+    done
+fi
 
 cat <<EOF
 
-NDS LAN demo is starting with ${PLAYER_COUNT} player worker(s).
+NDS LAN demo is starting with ${ROOM_COUNT} warm room group(s), ${TOTAL_WORKERS} warm worker(s).
+Lazy capacity is ${NDS_MAX_ROOM_COUNT} room group(s), ${MAX_WORKERS} worker port(s).
+WebRTC mux: ${WEBRTC_MUX_ENABLED}, public UDP port: ${WEBRTC_PUBLIC_PORT}, worker base UDP port: ${WEBRTC_BASE_PORT}.
 
 Open:
   http://fedora${COORDINATOR_ADDR}/mkds-lan.html?room=${ROOM}&players=${PLAYER_COUNT}&game=${GAME}

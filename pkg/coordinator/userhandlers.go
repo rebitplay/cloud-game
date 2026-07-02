@@ -13,16 +13,43 @@ func (u *User) HandleInitWebrtcStream(rq api.InitUserWebrtcStreamRequest) {
 		u.log.Warn().Msg("no worker assigned")
 		return
 	}
-	resp, err := u.w.InitWebrtcStream(u.Id().String(), rq.Initiator, rq.Sdp)
+	sessionID := u.Id().String()
+	sdp := rq.Sdp
+	if u.w.rtcMux != nil && sdp != "" {
+		sdp = u.w.rtcMux.rewriteUserSDP(sdp)
+	}
+	resp, err := u.w.InitWebrtcStream(sessionID, rq.Initiator, sdp)
 	if err != nil || resp == nil || *resp == api.EMPTY {
 		u.log.Error().Err(err).Msg("malformed WebRTC init response")
 		return
 	}
-	u.SendWebrtcOffer(string(*resp))
+	workerSDP := string(*resp)
+	if u.w.rtcMux != nil {
+		workerSDP = u.w.rtcMux.rewriteWorkerSDP(sessionID, u.w, workerSDP)
+	}
+	u.SendWebrtcOffer(workerSDP)
 }
 
 func (u *User) HandleWebrtcSignal(rq api.WebrtcSignalUser) {
-	u.w.WebrtcSignal(u.Id().String(), rq.Sdp, rq.Ice)
+	if u.w == nil {
+		u.log.Warn().Msg("no worker assigned")
+		return
+	}
+
+	sessionID := u.Id().String()
+	sdp := rq.Sdp
+	ice := rq.Ice
+	if u.w.rtcMux != nil {
+		if rq.Sdp != nil {
+			rewritten := u.w.rtcMux.rewriteUserSDP(*rq.Sdp)
+			sdp = &rewritten
+		}
+		if rq.Ice != nil {
+			rewritten := u.w.rtcMux.rewriteUserICE(*rq.Ice)
+			ice = &rewritten
+		}
+	}
+	u.w.WebrtcSignal(sessionID, sdp, ice)
 }
 
 func (u *User) HandleStartGame(rq api.GameStartUserRequest, conf config.CoordinatorConfig) {

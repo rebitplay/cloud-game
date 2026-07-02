@@ -23,7 +23,11 @@ type Coordinator struct {
 
 func New(conf config.CoordinatorConfig, log *logger.Logger) (*Coordinator, error) {
 	coordinator := &Coordinator{hub: NewHub(conf, log)}
+	if err := coordinator.hub.StartWebRTCMuxFromEnv(); err != nil {
+		return nil, err
+	}
 	h, err := NewHTTPServer(conf, log, func(mux *httpx.Mux) *httpx.Mux {
+		mux.HandleFunc("/api/nds/rooms", coordinator.hub.handleNDSRoomCreate())
 		mux.HandleFunc("/ws", coordinator.hub.handleUserConnection())
 		mux.HandleFunc("/wso", coordinator.hub.handleWorkerConnection())
 		return mux
@@ -48,6 +52,7 @@ func (c *Coordinator) Start() {
 
 func (c *Coordinator) Stop() error {
 	var err error
+	c.hub.Stop()
 	for _, s := range c.services {
 		if s != nil {
 			err0 := s.Stop()

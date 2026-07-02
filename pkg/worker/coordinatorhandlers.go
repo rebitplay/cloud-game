@@ -14,16 +14,19 @@ import (
 )
 
 // buildConnQuery builds initial connection data query to a coordinator.
-func buildConnQuery(id com.Uid, conf config.Worker, address string) (string, error) {
+func buildConnQuery(id com.Uid, conf config.Worker, webrtcPort int, address string) (string, error) {
 	addr := conf.GetPingAddr(address)
 	return toJson(api.ConnectionRequest[com.Uid]{
-		Addr:    addr.Hostname(),
-		Id:      id,
-		IsHTTPS: conf.Server.Https,
-		PingURL: addr.String(),
-		Port:    conf.GetPort(address),
-		Tag:     conf.Tag,
-		Zone:    conf.Network.Zone,
+		Addr:       addr.Hostname(),
+		Id:         id,
+		IsHTTPS:    conf.Server.Https,
+		NDSGroup:   conf.NDS.Group,
+		NDSPlayer:  conf.NDS.Player,
+		PingURL:    addr.String(),
+		Port:       conf.GetPort(address),
+		Tag:        conf.Tag,
+		WebRTCPort: webrtcPort,
+		Zone:       conf.Network.Zone,
 	})
 }
 
@@ -170,6 +173,11 @@ func (c *coordinator) HandleGameStart(rq api.StartGameRequest, w *Worker) api.Ou
 			r.Close()
 			w.router.SetRoom(nil)
 			return api.EmptyPacket
+		}
+		if w.consumePreparedSession(uid) && app.HasSave() {
+			if err := app.RestoreGameState(); err != nil {
+				c.log.Error().Err(err).Str("room", uid).Msg("couldn't restore prepared NDS save")
+			}
 		}
 
 		m.AudioSrcHz = app.AudioSampleRate()

@@ -3,6 +3,8 @@ package coordinator
 import (
 	"errors"
 	"fmt"
+	"strconv"
+	"strings"
 	"sync/atomic"
 
 	"github.com/giongto35/cloud-game/v3/pkg/api"
@@ -17,17 +19,22 @@ type Worker struct {
 	Session
 	slotted
 
-	Addr       string
-	PingServer string
-	Port       string
-	RoomId     string // room reference
-	Tag        string
-	Zone       string
+	Addr           string
+	NDSGroup       string
+	NDSPlayer      int
+	PingServer     string
+	Port           string
+	ReservedRoomId string
+	RoomId         string // room reference
+	Tag            string
+	WebRTCPort     int
+	Zone           string
 
 	Lib      []api.GameInfo
 	Sessions map[string]struct{}
 
-	log *logger.Logger
+	log    *logger.Logger
+	rtcMux *webRTCMux
 }
 
 type RegionalClient interface {
@@ -59,19 +66,31 @@ type AppMeta struct {
 	Type   string
 }
 
-func NewWorker(sock *com.Connection, handshake api.ConnectionRequest[com.Uid], log *logger.Logger) *Worker {
+func NewWorker(sock *com.Connection, handshake api.ConnectionRequest[com.Uid], log *logger.Logger, rtcMux *webRTCMux) *Worker {
 	conn := com.NewConnection[api.PT, api.In[com.Uid], api.Out, *api.Out](sock, handshake.Id, log)
+	ndsPlayer := handshake.NDSPlayer
+	if ndsPlayer == 0 {
+		ndsPlayer = inferNDSPlayer(handshake.Tag, handshake.Zone)
+	}
+	ndsGroup := handshake.NDSGroup
+	if ndsGroup == "" {
+		ndsGroup = inferNDSGroup(handshake.Tag, handshake.Zone)
+	}
 	return &Worker{
 		Connection: conn,
 		Addr:       handshake.Addr,
+		NDSGroup:   ndsGroup,
+		NDSPlayer:  ndsPlayer,
 		PingServer: handshake.PingURL,
 		Port:       handshake.Port,
 		Tag:        handshake.Tag,
+		WebRTCPort: handshake.WebRTCPort,
 		Zone:       handshake.Zone,
 		log: log.Extend(log.With().
 			Str(logger.ClientField, logger.MarkNone).
 			Str(logger.DirectionField, logger.MarkNone).
 			Str("cid", conn.Id().Short())),
+		rtcMux: rtcMux,
 	}
 }
 
@@ -182,13 +201,72 @@ func (s *slotted) UnReserve() {
 
 func (s *slotted) FreeSlots() { atomic.StoreInt32((*int32)(s), 0) }
 
+func (w *Worker) ReserveRoom(id string) bool {
+	if !w.TryReserve() {
+		return false
+	}
+	w.RoomId = id
+	w.ReservedRoomId = id
+	return true
+}
+
+func (w *Worker) ReleaseReservation(id string) bool {
+	if w.ReservedRoomId != id {
+		return false
+	}
+	w.ReservedRoomId = ""
+	w.RoomId = ""
+	w.FreeSlots()
+	return true
+}
+
 func (w *Worker) Disconnect() {
+	if w.rtcMux != nil {
+		w.rtcMux.unregisterWorker(w)
+	}
 	w.Connection.Disconnect()
 	w.RoomId = ""
+	w.ReservedRoomId = ""
 	w.FreeSlots()
 }
 
 func (w *Worker) PrintInfo() string {
-	return fmt.Sprintf("id: %v, addr: %v, port: %v, zone: %v, ping addr: %v, tag: %v",
-		w.Id(), w.Addr, w.Port, w.Zone, w.PingServer, w.Tag)
+	return fmt.Sprintf("id: %v, addr: %v, port: %v, webrtc port: %v, zone: %v, ping addr: %v, tag: %v, nds group: %v, nds player: %v",
+		w.Id(), w.Addr, w.Port, w.WebRTCPort, w.Zone, w.PingServer, w.Tag, w.NDSGroup, w.NDSPlayer)
+}
+
+func inferNDSPlayer(names ...string) int {
+	for _, name := range names {
+		_, player, ok := splitNDSPlayerSuffix(name)
+		if ok {
+			return player
+		}
+	}
+	return 0
+}
+
+func inferNDSGroup(tag string, zone string) string {
+	for _, name := range []string{tag, zone} {
+		group, _, ok := splitNDSPlayerSuffix(name)
+		if ok && group != "" {
+			return group
+		}
+	}
+	return "default"
+}
+
+func splitNDSPlayerSuffix(name string) (string, int, bool) {
+	idx := strings.LastIndex(name, "-p")
+	if idx < 0 || idx == 0 || idx+2 >= len(name) {
+		return "", 0, false
+	}
+	suffix := name[idx+2:]
+	if strings.Contains(suffix, "-") {
+		return "", 0, false
+	}
+	player, err := strconv.Atoi(suffix)
+	if err != nil || player < 1 || player > 4 {
+		return "", 0, false
+	}
+	return name[:idx], player, true
 }

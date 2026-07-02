@@ -84,8 +84,8 @@ func TestPixFmtMapping(t *testing.T) {
 	if pixFmtToGst[pixFmtBGRx] != "BGRx" {
 		t.Errorf("BGRx format mismatch: %q", pixFmtToGst[pixFmtBGRx])
 	}
-	if pixFmtToGst[pixFmtBGRA] != "BGRA" {
-		t.Errorf("BGRA format mismatch: %q", pixFmtToGst[pixFmtBGRA])
+	if pixFmtToGst[pixFmtBGRA] != "BGRx" {
+		t.Errorf("XRGB8888 format mismatch: %q", pixFmtToGst[pixFmtBGRA])
 	}
 	if pixFmtToGst[pixFmtRGB16] != "RGB16" {
 		t.Errorf("RGB16 format mismatch: %q", pixFmtToGst[pixFmtRGB16])
@@ -210,6 +210,22 @@ func TestProcessAudio(t *testing.T) {
 	case <-time.After(5 * time.Second):
 		t.Fatal("timed out waiting for encoded audio")
 	}
+}
+
+func TestProcessAudioEmpty(t *testing.T) {
+	g := NewGstreamer(testFullCodec, testLog)
+	g.VideoW, g.VideoH = 64, 64
+	g.VideoScale = 1
+	g.AudioSrcHz = 48000
+
+	if err := g.Init(); err != nil {
+		t.Fatal(err)
+	}
+	defer g.Destroy()
+
+	g.ProcessAudio(nil, func([]byte, time.Duration) {
+		t.Fatal("empty audio should not be encoded")
+	})
 }
 
 func TestReinit(t *testing.T) {

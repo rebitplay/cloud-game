@@ -67,25 +67,27 @@ func (o *Out) GetPayload() any         { return o.Payload }
 // 15x - webrtc data exchange codes
 // 2xx - worker codes
 const (
-	CheckLatency     PT = 3
-	InitSession      PT = 4
-	InitWebrtcStream PT = 100
-	WebrtcSignal     PT = 101
-	StartGame        PT = 104
-	QuitGame         PT = 105
-	SaveGame         PT = 106
-	LoadGame         PT = 107
-	ChangePlayer     PT = 108
-	RecordGame       PT = 110
-	GetWorkerList    PT = 111
-	ErrNoFreeSlots   PT = 112
-	ResetGame        PT = 113
-	RegisterRoom     PT = 201
-	CloseRoom        PT = 202
-	TerminateSession PT = 204
-	AppVideoChange   PT = 150
-	LibNewGameList   PT = 205
-	PrevSessions     PT = 206
+	CheckLatency      PT = 3
+	InitSession       PT = 4
+	InitWebrtcStream  PT = 100
+	WebrtcSignal      PT = 101
+	StartGame         PT = 104
+	QuitGame          PT = 105
+	SaveGame          PT = 106
+	LoadGame          PT = 107
+	ChangePlayer      PT = 108
+	RecordGame        PT = 110
+	GetWorkerList     PT = 111
+	ErrNoFreeSlots    PT = 112
+	ResetGame         PT = 113
+	RegisterRoom      PT = 201
+	CloseRoom         PT = 202
+	TerminateSession  PT = 204
+	AppVideoChange    PT = 150
+	LibNewGameList    PT = 205
+	PrevSessions      PT = 206
+	NDSRomInstall     PT = 207
+	NDSSessionPrepare PT = 208
 )
 
 func (p PT) String() string {
@@ -128,6 +130,10 @@ func (p PT) String() string {
 		return "LibNewGameList"
 	case PrevSessions:
 		return "PrevSessions"
+	case NDSRomInstall:
+		return "NDSRomInstall"
+	case NDSSessionPrepare:
+		return "NDSSessionPrepare"
 	default:
 		return "Unknown"
 	}

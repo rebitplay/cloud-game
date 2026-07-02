@@ -28,7 +28,7 @@ type coordinator struct {
 
 var connector com.Client
 
-func newCoordinatorConnection(host string, conf config.Worker, addr string, log *logger.Logger) (*coordinator, error) {
+func newCoordinatorConnection(host string, conf config.Worker, webrtcPort int, addr string, log *logger.Logger) (*coordinator, error) {
 	scheme := "ws"
 	if conf.Network.Secure {
 		scheme = "wss"
@@ -41,7 +41,7 @@ func newCoordinatorConnection(host string, conf config.Worker, addr string, log 
 		Msgf("Handshake %s", address.String())
 
 	id := com.NewUid()
-	req, err := buildConnQuery(id, conf, addr)
+	req, err := buildConnQuery(id, conf, webrtcPort, addr)
 	if req != "" && err == nil {
 		address.RawQuery = "data=" + req
 	} else {
@@ -92,6 +92,10 @@ func (c *coordinator) HandleRequests(w *Worker) chan struct{} {
 			err = api.Do(x, func(d api.GameQuitRequest) { c.HandleQuitGame(d, w) })
 		case api.ResetGame:
 			err = api.Do(x, func(d api.ResetGameRequest) { c.HandleResetGame(d, w) })
+		case api.NDSRomInstall:
+			err = api.Do(x, func(d api.NDSRomInstallRequest) { out = c.HandleNDSRomInstall(d, w) })
+		case api.NDSSessionPrepare:
+			err = api.Do(x, func(d api.NDSSessionPrepareRequest) { out = c.HandleNDSSessionPrepare(d, w) })
 		default:
 			c.log.Warn().Msgf("unhandled packet type %v", x.T)
 		}

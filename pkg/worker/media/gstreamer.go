@@ -94,7 +94,7 @@ var cachedSegment *gst.Segment
 var cpuCores int
 var pixFmtToGst = map[uint32]string{
 	pixFmtBGRx:  "BGRx",
-	pixFmtBGRA:  "BGRA",
+	pixFmtBGRA:  "BGRx",
 	pixFmtRGB16: "RGB16",
 }
 var pixFmtCache = map[string]uint32{}
@@ -298,6 +298,9 @@ func (g *GstMediaPipe) Destroy() {
 }
 
 func (g *GstMediaPipe) ProcessAudio(audio []byte, cb func([]byte, time.Duration)) {
+	if len(audio) == 0 {
+		return
+	}
 	g.onAudio = cb
 	if !g.aSegSent {
 		g.aSegSent = true

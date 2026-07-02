@@ -22,18 +22,39 @@ type Connection interface {
 }
 
 type Hub struct {
-	conf    config.CoordinatorConfig
-	log     *logger.Logger
-	users   com.NetMap[com.Uid, *User]
-	workers com.NetMap[com.Uid, *Worker]
+	conf       config.CoordinatorConfig
+	log        *logger.Logger
+	ndsSpawner *ndsSpawner
+	users      com.NetMap[com.Uid, *User]
+	webrtcMux  *webRTCMux
+	workers    com.NetMap[com.Uid, *Worker]
 }
 
 func NewHub(conf config.CoordinatorConfig, log *logger.Logger) *Hub {
 	return &Hub{
-		conf:    conf,
-		users:   com.NewNetMap[com.Uid, *User](),
-		workers: com.NewNetMap[com.Uid, *Worker](),
-		log:     log,
+		conf:       conf,
+		users:      com.NewNetMap[com.Uid, *User](),
+		workers:    com.NewNetMap[com.Uid, *Worker](),
+		ndsSpawner: newNDSSpawnerFromEnv(log),
+		log:        log,
+	}
+}
+
+func (h *Hub) StartWebRTCMuxFromEnv() error {
+	mux, err := newWebRTCMuxFromEnv(h.log)
+	if err != nil {
+		return err
+	}
+	h.webrtcMux = mux
+	return nil
+}
+
+func (h *Hub) Stop() {
+	if h.ndsSpawner != nil {
+		h.ndsSpawner.stop()
+	}
+	if h.webrtcMux != nil {
+		h.webrtcMux.stop()
 	}
 }
 
@@ -139,7 +160,7 @@ func (h *Hub) handleWorkerConnection() http.HandlerFunc {
 		}
 		conn.SetMaxReadSize(h.conf.Coordinator.MaxWsSize)
 
-		worker := NewWorker(conn, *handshake, log)
+		worker := NewWorker(conn, *handshake, log, h.webrtcMux)
 		defer h.workers.RemoveDisconnect(worker)
 		done := worker.HandleRequests(&h.users)
 		h.workers.Add(worker)
@@ -154,14 +175,17 @@ func (h *Hub) GetServerList() (r []api.Server) {
 	debug := h.conf.Coordinator.Debug
 	for w := range h.workers.Values() {
 		server := api.Server{
-			Addr:    w.Addr,
-			Id:      w.Id(),
-			IsBusy:  !w.HasSlot(),
-			Machine: string(w.Id().Machine()),
-			PingURL: w.PingServer,
-			Port:    w.Port,
-			Tag:     w.Tag,
-			Zone:    w.Zone,
+			Addr:       w.Addr,
+			Id:         w.Id(),
+			IsBusy:     !w.HasSlot(),
+			Machine:    string(w.Id().Machine()),
+			NDSGroup:   w.NDSGroup,
+			NDSPlayer:  w.NDSPlayer,
+			PingURL:    w.PingServer,
+			Port:       w.Port,
+			Tag:        w.Tag,
+			WebRTCPort: w.WebRTCPort,
+			Zone:       w.Zone,
 		}
 		if debug {
 			server.Room = w.RoomId
