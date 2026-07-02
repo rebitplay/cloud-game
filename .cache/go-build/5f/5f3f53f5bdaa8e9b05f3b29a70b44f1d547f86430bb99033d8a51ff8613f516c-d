@@ -1,7 +1,0 @@
-# test log
-getenv HOME
-stat config.yaml
-open config.yaml
-stat configs/config.yaml
-stat ../../../configs/config.yaml
-stat /src/.cr/config.yaml

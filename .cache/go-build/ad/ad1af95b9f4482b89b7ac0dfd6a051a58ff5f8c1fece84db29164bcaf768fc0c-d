@@ -1,8 +1,0 @@
-./base36.go
-./errors.go
-./nonce.go
-./server.go
-./short_nonce.go
-./stun.go
-./turn.go
-./util.go

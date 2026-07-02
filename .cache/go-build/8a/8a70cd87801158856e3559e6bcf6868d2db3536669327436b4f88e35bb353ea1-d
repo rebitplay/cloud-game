@@ -1,4 +1,0 @@
-./interceptor.go
-./received_stats.go
-./sent_stats.go
-./stats_recorder.go

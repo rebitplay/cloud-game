@@ -1,5 +1,0 @@
-./interceptor.go
-./option.go
-./recorder.go
-./stream_log.go
-./ticker.go
