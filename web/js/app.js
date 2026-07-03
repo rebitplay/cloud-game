@@ -40,7 +40,7 @@ import { input, KEY } from "input";
 import { socket, webrtc } from "network";
 import { debounce } from "utils";
 
-import { gameList } from "./gameList.js?v=7";
+import { gameList } from "./gameList.js?v=8";
 import { menu } from "./menu.js?v=7";
 import { message } from "./message.js?v=7";
 import { recording } from "./recording.js?v=7";

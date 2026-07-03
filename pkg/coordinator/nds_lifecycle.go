@@ -266,6 +266,24 @@ func (h *Hub) recordNDSSaveStatus(status api.NDSSaveStatus) {
 	}
 }
 
+func (h *Hub) recordNDSStreamBytes(workerRoomID string, bytesStreamed int64) {
+	if bytesStreamed <= 0 {
+		return
+	}
+	roomID := ndsRoomBaseFromWorkerRoom(workerRoomID)
+	if roomID == "" {
+		return
+	}
+	room := h.ndsRooms.get(roomID)
+	if room == nil {
+		return
+	}
+	room.mu.Lock()
+	room.streamedBytes += bytesStreamed
+	room.updatedAt = time.Now().UTC()
+	room.mu.Unlock()
+}
+
 func (h *Hub) ndsRoomClosedExtra(room *ndsRoomSession, reason string) map[string]any {
 	room.mu.Lock()
 	defer room.mu.Unlock()
@@ -287,8 +305,9 @@ func (h *Hub) ndsRoomClosedExtra(room *ndsRoomSession, reason string) map[string
 		durationSec = int64(room.closedAt.Sub(*room.startedAt).Seconds())
 	}
 	return map[string]any{
-		"duration_sec": durationSec,
-		"players":      players,
-		"reason":       reason,
+		"bytes_streamed": room.streamedBytes,
+		"duration_sec":   durationSec,
+		"players":        players,
+		"reason":         reason,
 	}
 }

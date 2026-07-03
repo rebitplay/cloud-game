@@ -112,7 +112,9 @@ func (c *coordinator) HandleRequests(w *Worker) chan struct{} {
 func (c *coordinator) RegisterRoom(id string) { c.Notify(api.RegisterRoom, id) }
 
 // CloseRoom sends a signal to coordinator which will remove that room from its list.
-func (c *coordinator) CloseRoom(id string) { c.Notify(api.CloseRoom, id) }
+func (c *coordinator) CloseRoom(id string, bytesStreamed int64) {
+	c.Notify(api.CloseRoom, api.CloseRoomRequest{RoomID: id, BytesStreamed: bytesStreamed})
+}
 func (c *coordinator) IceCandidate(candidate string, sessionId string) {
 	c.Notify(api.WebrtcSignal, api.WebrtcSignalRequest{
 		Stateful: api.Stateful{Id: sessionId},

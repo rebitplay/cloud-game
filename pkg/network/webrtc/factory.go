@@ -73,7 +73,7 @@ func NewApiFactory(conf config.Webrtc, log *logger.Logger, mod ModApiFun) (api *
 		log.Info().Msgf("The NAT mapping is active for %v", conf.IceIpMap)
 	}
 
-	s.SetICEMulticastDNSMode(ice.MulticastDNSModeDisabled)
+	s.SetICEMulticastDNSMode(ice.MulticastDNSModeQueryOnly)
 	s.EnableSCTPZeroChecksum(true)
 	if len(conf.IpFilter) > 0 {
 		s.SetIPFilter(func(i net.IP) (keep bool) {

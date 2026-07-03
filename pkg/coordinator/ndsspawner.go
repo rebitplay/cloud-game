@@ -31,6 +31,7 @@ type ndsSpawner struct {
 	display         string
 	runtimeDir      string
 	videoCodec      string
+	workerIceLite   string
 	includeLoopback string
 	iceIPMap        string
 	webrtcBasePort  int
@@ -49,8 +50,11 @@ func newNDSSpawnerFromEnv(log *logger.Logger) *ndsSpawner {
 	}
 
 	defaultWebRTCBasePort := 8640
-	if envBool("WEBRTC_MUX_ENABLED", false) || envBool("CLOUD_GAME_WEBRTC_MUX_ENABLED", false) {
+	workerIceLiteDefault := "false"
+	muxEnabled := envBool("WEBRTC_MUX_ENABLED", false) || envBool("CLOUD_GAME_WEBRTC_MUX_ENABLED", false)
+	if muxEnabled {
 		defaultWebRTCBasePort = 8700
+		workerIceLiteDefault = "true"
 	}
 	warmGroups := envInt("ROOM_COUNT", envInt("WARM_GROUPS", envInt("NDS_WARM_GROUPS", envInt("NDS_ROOM_COUNT", 0))))
 	maxGroups := envInt("NDS_MAX_ROOM_COUNT", defaultNDSDynamicMaxGroups)
@@ -69,6 +73,7 @@ func newNDSSpawnerFromEnv(log *logger.Logger) *ndsSpawner {
 		display:         envString("DISPLAY", ":99"),
 		runtimeDir:      envString("RUNTIME_DIR", "/tmp/cloud-game/nds-lan"),
 		videoCodec:      envString("CLOUD_GAME_ENCODER_VIDEO_CODEC", "vp8"),
+		workerIceLite:   envString("CLOUD_GAME_WEBRTC_ICELITE", workerIceLiteDefault),
 		includeLoopback: envString("CLOUD_GAME_WEBRTC_INCLUDELOOPBACKCANDIDATE", "false"),
 		iceIPMap:        envString("CLOUD_GAME_WEBRTC_ICEIPMAP", envString("BUNNY_ANYCAST_IP", "")),
 		webrtcBasePort:  envInt("WEBRTC_WORKER_BASE_PORT", envInt("WEBRTC_BASE_PORT", defaultWebRTCBasePort)),
@@ -200,6 +205,7 @@ func (s *ndsSpawner) startWorker(groupID string, player int) (*exec.Cmd, error) 
 		"CLOUD_GAME_WORKER_NDS_GROUP":                groupID,
 		"CLOUD_GAME_WORKER_NDS_PLAYER":               strconv.Itoa(player),
 		"CLOUD_GAME_ENCODER_VIDEO_CODEC":             s.videoCodec,
+		"CLOUD_GAME_WEBRTC_ICELITE":                  s.workerIceLite,
 		"CLOUD_GAME_WEBRTC_SINGLEPORT":               strconv.Itoa(webrtcPort),
 		"CLOUD_GAME_WEBRTC_INCLUDELOOPBACKCANDIDATE": s.includeLoopback,
 		"CLOUD_GAME_WEBRTC_ICEIPMAP":                 s.iceIPMap,

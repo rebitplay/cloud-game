@@ -39,6 +39,26 @@ func TestNDSJoinTimeoutClosesRoom(t *testing.T) {
 	t.Fatalf("room state = %s, want closed", h.ndsRooms.get("room-123").state)
 }
 
+func TestNDSStreamBytesRecordedInClosedExtra(t *testing.T) {
+	h := NewHub(config.CoordinatorConfig{}, logger.NewConsole(false, "test", false))
+	room := &ndsRoomSession{
+		createdAt: time.Now().UTC(),
+		players: map[int]*ndsSeat{
+			1: {player: 1, ref: "user_1", roomID: "room-123-p1___Tetris"},
+		},
+		roomID: "room-123",
+		state:  ndsRoomActive,
+	}
+	h.ndsRooms.put(room)
+
+	h.recordNDSStreamBytes("room-123-p1___Tetris", 4096)
+	extra := h.ndsRoomClosedExtra(room, ndsCloseHost)
+
+	if got := extra["bytes_streamed"]; got != int64(4096) {
+		t.Fatalf("bytes_streamed = %#v, want 4096", got)
+	}
+}
+
 func TestNDSWebhookSignatureAndDelivery(t *testing.T) {
 	t.Setenv("NDS_WEBHOOK_SECRET", "hook-secret")
 	received := make(chan http.Header, 1)

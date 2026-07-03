@@ -55,6 +55,20 @@ func TestRouter(t *testing.T) {
 	router.Close()
 }
 
+func TestRoomStreamedBytesCountsEncodedMediaPerRecipient(t *testing.T) {
+	users := com.NewNetMap[sKey, *tSession]()
+	users.Add(&tSession{id: "p1"})
+	users.Add(&tSession{id: "p2"})
+	r := NewRoom("room-123", nil, &users, nil)
+
+	r.sendVideo([]byte{1, 2, 3}, time.Second)
+	r.sendAudio([]byte{4, 5}, time.Second)
+
+	if got, want := r.StreamedBytes(), int64((3+2)*2); got != want {
+		t.Fatalf("StreamedBytes() = %d, want %d", got, want)
+	}
+}
+
 func TestRouterReset(t *testing.T) {
 	u := lookMap{NetMap: com.NewNetMap[sKey, *tSession]()}
 	router := Router[*tSession]{users: &u}

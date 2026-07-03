@@ -116,7 +116,7 @@ func (c *coordinator) HandleGameStart(rq api.StartGameRequest, w *Worker) api.Ou
 		roomUsers := com.NewNetMap[room.SessionKey, *room.GameSession]()
 		r = room.NewRoom(uid, nil, &roomUsers, nil)
 		r.HandleClose = func() {
-			c.CloseRoom(uid)
+			c.CloseRoom(uid, r.StreamedBytes())
 			c.log.Debug().Msgf("room close request %v sent", uid)
 		}
 

@@ -242,6 +242,12 @@ func TestNDSDemoCreateBuildsTokenizedStreamURLs(t *testing.T) {
 		if q.Get("id") == "" || q.Get("view") != "stream" || q.Get("client") != "v9" {
 			t.Fatalf("stream URL missing app params: %s", player.URL)
 		}
+		if q.Get("player") != strconv.Itoa(player.Player) {
+			t.Fatalf("stream URL player = %q, want %d: %s", q.Get("player"), player.Player, player.URL)
+		}
+		if q.Get("game") != resp.Game {
+			t.Fatalf("stream URL game = %q, want %q: %s", q.Get("game"), resp.Game, player.URL)
+		}
 	}
 }
 

@@ -3,6 +3,8 @@ import {gui} from 'gui';
 
 const TOP_POSITION = 102
 const SELECT_THRESHOLD_MS = 160
+const pageParams = new URLSearchParams(document.location.search)
+const queryGameName = () => pageParams.get('game') || pageParams.get('game_name') || ''
 
 const games = (() => {
     let list = [], index = 0
@@ -14,14 +16,25 @@ const games = (() => {
             return list
         },
         get selected() {
-            return list[index].title // selected by the game title, oof
+            return list[index]?.title || queryGameName() // selected by the game title, oof
         },
         set index(i) {
+            if (list.length === 0) {
+                index = 0
+                return
+            }
             index = i < -1 ? i = 0 :
                 i > list.length ? i = list.length - 1 :
                     (i % list.length + list.length) % list.length
         },
-        set: (data = []) => list = data.sort((a, b) => a.title.toLowerCase() > b.title.toLowerCase() ? 1 : -1),
+        set: (data = []) => {
+            const next = Array.isArray(data) ? data : []
+            list = next
+                .filter((game) => game && typeof game.title === 'string' && game.title)
+                .sort((a, b) => a.title.toLowerCase() > b.title.toLowerCase() ? 1 : -1)
+            if (index >= list.length) index = Math.max(0, list.length - 1)
+            return list
+        },
         empty: () => list.length === 0
     }
 })()

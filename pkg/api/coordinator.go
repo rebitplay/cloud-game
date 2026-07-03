@@ -1,7 +1,12 @@
 package api
 
+import "encoding/json"
+
 type (
-	CloseRoomRequest        string
+	CloseRoomRequest struct {
+		RoomID        string `json:"room_id"`
+		BytesStreamed int64  `json:"bytes_streamed,omitempty"`
+	}
 	ConnectionRequest[T Id] struct {
 		Addr       string `json:"addr,omitempty"`
 		Id         T      `json:"id,omitempty"`
@@ -19,6 +24,26 @@ type (
 	}
 	RegisterRoomRequest string
 )
+
+func (r CloseRoomRequest) String() string {
+	return r.RoomID
+}
+
+func (r *CloseRoomRequest) UnmarshalJSON(data []byte) error {
+	var roomID string
+	if err := json.Unmarshal(data, &roomID); err == nil {
+		r.RoomID = roomID
+		return nil
+	}
+
+	type closeRoomRequest CloseRoomRequest
+	var req closeRoomRequest
+	if err := json.Unmarshal(data, &req); err != nil {
+		return err
+	}
+	*r = CloseRoomRequest(req)
+	return nil
+}
 
 const (
 	DataQueryParam   = "data"

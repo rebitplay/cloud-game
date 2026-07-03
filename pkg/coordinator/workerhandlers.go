@@ -10,7 +10,10 @@ func (w *Worker) HandleRegisterRoom(rq api.RegisterRoomRequest) {
 }
 
 func (w *Worker) HandleCloseRoom(rq api.CloseRoomRequest) {
-	if string(rq) == w.RoomId {
+	if rq.RoomID == w.RoomId {
+		if w.hub != nil {
+			w.hub.recordNDSStreamBytes(rq.RoomID, rq.BytesStreamed)
+		}
 		w.RoomId = ""
 		w.ReservedRoomId = ""
 		w.FreeSlots()

@@ -12,12 +12,14 @@ import (
 	"time"
 
 	"github.com/giongto35/cloud-game/v3/pkg/logger"
+	"github.com/pion/stun/v3"
 )
 
 const (
 	defaultWebRTCMuxPort = 8641
 	stunMagicCookie      = 0x2112A442
 	stunAttrUsername     = 0x0006
+	stunAttrUseCandidate = 0x0025
 )
 
 type webRTCMux struct {
@@ -42,6 +44,7 @@ type webRTCMuxRoute struct {
 	sessionID    string
 	workerID     string
 	workerUfrag  string
+	workerPwd    string
 	workerAddr   *net.UDPAddr
 	browserAddr  *net.UDPAddr
 	browserAddrs map[string]*net.UDPAddr
@@ -138,7 +141,8 @@ func (m *webRTCMux) forward(packet []byte, src *net.UDPAddr) {
 			return
 		}
 		for _, dst := range dsts {
-			if _, err := m.conn.WriteToUDP(packet, dst); err != nil {
+			out := rewriteSTUNBindingSuccess(packet, dst, route.workerPwd)
+			if _, err := m.conn.WriteToUDP(out, dst); err != nil {
 				m.log.Debug().Err(err).Str("dst", dst.String()).Msg("WebRTC mux write to browser failed")
 			}
 		}
@@ -147,6 +151,12 @@ func (m *webRTCMux) forward(packet []byte, src *net.UDPAddr) {
 
 	m.rememberBrowser(route, src)
 	m.tracePacket("browser->worker", packet, src, route, false)
+	if reply := buildSTUNBindingSuccess(packet, src, route.workerPwd); reply != nil {
+		m.tracePacket("browser<-mux", reply, src, route, true)
+		if _, err := m.conn.WriteToUDP(reply, src); err != nil {
+			m.log.Debug().Err(err).Str("dst", src.String()).Msg("WebRTC mux STUN reply to browser failed")
+		}
+	}
 	if _, err := m.conn.WriteToUDP(packet, route.workerAddr); err != nil {
 		m.log.Debug().Err(err).Str("dst", route.workerAddr.String()).Msg("WebRTC mux write to worker failed")
 	}
@@ -162,6 +172,15 @@ func (m *webRTCMux) tracePacket(direction string, packet []byte, src *net.UDPAdd
 		Str("src", src.String()).
 		Str("kind", muxPacketKind(packet)).
 		Int("bytes", len(packet))
+	if info, ok := muxSTUNInfo(packet); ok {
+		event = event.
+			Str("stun_type", info.typ).
+			Str("stun_username", info.username).
+			Bool("stun_use_candidate", info.useCandidate)
+		if info.xorMapped != "" {
+			event = event.Str("stun_xor_mapped", info.xorMapped)
+		}
+	}
 	if route != nil {
 		event = event.
 			Str("session", route.sessionID).
@@ -279,7 +298,7 @@ func preferBrowserAddr(current *net.UDPAddr, next *net.UDPAddr) bool {
 func (m *webRTCMux) rewriteWorkerSDP(sessionID string, w *Worker, raw string) string {
 	rewritten, ufrag := rewriteRTCSessionSDP(raw, m.publicHost, m.publicPort)
 	if ufrag != "" {
-		m.registerWorkerSession(sessionID, w, ufrag)
+		m.registerWorkerSession(sessionID, w, ufrag, extractRTCSessionSDPPwd(raw))
 	}
 	return rewritten
 }
@@ -294,7 +313,7 @@ func (m *webRTCMux) rewriteWorkerICE(sessionID string, w *Worker, raw string) st
 		return raw
 	}
 	if ufrag := candidateJSONUfrag(raw); ufrag != "" {
-		m.registerWorkerSession(sessionID, w, ufrag)
+		m.registerWorkerSession(sessionID, w, ufrag, "")
 	}
 	return rewriteCandidateJSON(raw, m.publicHost, m.publicPort)
 }
@@ -306,7 +325,7 @@ func (m *webRTCMux) rewriteUserICE(raw string) string {
 	return rewriteCandidateJSON(raw, m.workerHost, m.listenPort)
 }
 
-func (m *webRTCMux) registerWorkerSession(sessionID string, w *Worker, workerUfrag string) {
+func (m *webRTCMux) registerWorkerSession(sessionID string, w *Worker, workerUfrag string, workerPwd string) {
 	if m == nil || w == nil || sessionID == "" || workerUfrag == "" || w.WebRTCPort == 0 {
 		return
 	}
@@ -338,6 +357,9 @@ func (m *webRTCMux) registerWorkerSession(sessionID string, w *Worker, workerUfr
 
 	route.workerID = w.Id().String()
 	route.workerUfrag = workerUfrag
+	if workerPwd != "" {
+		route.workerPwd = workerPwd
+	}
 	route.workerAddr = workerAddr
 	route.updatedAt = time.Now()
 	m.routesByUfrag[workerUfrag] = route
@@ -540,6 +562,25 @@ func extractSDPUfrag(sdp string) string {
 	return ""
 }
 
+func extractSDPPwd(sdp string) string {
+	for _, line := range strings.Split(sdp, "\n") {
+		line = strings.TrimSpace(line)
+		if strings.HasPrefix(line, "a=ice-pwd:") {
+			return strings.TrimPrefix(line, "a=ice-pwd:")
+		}
+	}
+	return ""
+}
+
+func extractRTCSessionSDPPwd(raw string) string {
+	payload := map[string]any{}
+	if err := json.Unmarshal([]byte(raw), &payload); err != nil {
+		return ""
+	}
+	sdp, _ := payload["sdp"].(string)
+	return extractSDPPwd(sdp)
+}
+
 func candidateAttribute(candidate string, attr string) string {
 	fields := strings.Fields(candidate)
 	for i := 0; i+1 < len(fields); i++ {
@@ -579,11 +620,96 @@ func stunUsername(packet []byte) (string, bool) {
 	return "", false
 }
 
+type muxSTUNPacketInfo struct {
+	typ          string
+	username     string
+	useCandidate bool
+	xorMapped    string
+}
+
+func muxSTUNInfo(packet []byte) (muxSTUNPacketInfo, bool) {
+	if !isSTUNPacket(packet) {
+		return muxSTUNPacketInfo{}, false
+	}
+	msg := &stun.Message{Raw: packet}
+	if err := msg.Decode(); err != nil {
+		return muxSTUNPacketInfo{typ: "decode-error"}, true
+	}
+
+	info := muxSTUNPacketInfo{
+		typ:          msg.Type.String(),
+		useCandidate: msg.Contains(stun.AttrUseCandidate),
+	}
+	var username stun.Username
+	if err := username.GetFrom(msg); err == nil {
+		info.username = username.String()
+	}
+	var xorMapped stun.XORMappedAddress
+	if err := xorMapped.GetFrom(msg); err == nil {
+		info.xorMapped = xorMapped.String()
+	}
+	return info, true
+}
+
+func rewriteSTUNBindingSuccess(packet []byte, browserAddr *net.UDPAddr, workerPwd string) []byte {
+	if workerPwd == "" || browserAddr == nil || !isSTUNPacket(packet) {
+		return packet
+	}
+
+	msg := &stun.Message{Raw: packet}
+	if err := msg.Decode(); err != nil || msg.Type != stun.BindingSuccess || !msg.Contains(stun.AttrXORMappedAddress) {
+		return packet
+	}
+
+	ip := browserAddr.IP
+	if v4 := ip.To4(); v4 != nil {
+		ip = v4
+	}
+	out, err := stun.Build(
+		msg,
+		stun.BindingSuccess,
+		&stun.XORMappedAddress{IP: ip, Port: browserAddr.Port},
+		stun.NewShortTermIntegrity(workerPwd),
+		stun.Fingerprint,
+	)
+	if err != nil {
+		return packet
+	}
+	return out.Raw
+}
+
+func buildSTUNBindingSuccess(packet []byte, browserAddr *net.UDPAddr, workerPwd string) []byte {
+	if workerPwd == "" || browserAddr == nil || !isSTUNPacket(packet) {
+		return nil
+	}
+
+	msg := &stun.Message{Raw: packet}
+	if err := msg.Decode(); err != nil || msg.Type != stun.BindingRequest {
+		return nil
+	}
+
+	ip := browserAddr.IP
+	if v4 := ip.To4(); v4 != nil {
+		ip = v4
+	}
+	out, err := stun.Build(
+		msg,
+		stun.BindingSuccess,
+		&stun.XORMappedAddress{IP: ip, Port: browserAddr.Port},
+		stun.NewShortTermIntegrity(workerPwd),
+		stun.Fingerprint,
+	)
+	if err != nil {
+		return nil
+	}
+	return out.Raw
+}
+
 func muxPacketKind(packet []byte) string {
 	if len(packet) == 0 {
 		return "empty"
 	}
-	if len(packet) >= 20 && packet[0]&0xC0 == 0 && binary.BigEndian.Uint32(packet[4:8]) == stunMagicCookie {
+	if isSTUNPacket(packet) {
 		return "stun"
 	}
 	if packet[0] >= 20 && packet[0] <= 63 {
@@ -593,6 +719,10 @@ func muxPacketKind(packet []byte) string {
 		return "rtp-rtcp"
 	}
 	return fmt.Sprintf("0x%02x", packet[0])
+}
+
+func isSTUNPacket(packet []byte) bool {
+	return len(packet) >= 20 && packet[0]&0xC0 == 0 && binary.BigEndian.Uint32(packet[4:8]) == stunMagicCookie
 }
 
 func splitICEUsername(username string) (string, string) {

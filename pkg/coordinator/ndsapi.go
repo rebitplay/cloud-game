@@ -299,7 +299,7 @@ func (h *Hub) createNDSDemoRoom(r *http.Request, req ndsDemoRoomCreateRequest) (
 		if stream.Player == 0 {
 			stream = api.NDSPlayerStream{Group: groupID, Player: player.Player, RoomID: v1Resp.RoomID}
 		}
-		stream.URL = ndsDemoStreamURL(baseURL, stream.RoomID, stream.Zone, player.Token)
+		stream.URL = ndsDemoStreamURL(baseURL, stream.RoomID, stream.Zone, player.Token, stream.Player, v1Resp.Game)
 		players = append(players, stream)
 	}
 
@@ -728,7 +728,7 @@ func isBuiltinNDSAPIURL(u *url.URL) bool {
 	return u != nil && (u.Scheme == "builtin" || u.Scheme == "local") && (u.Opaque != "" || u.Path != "")
 }
 
-func ndsDemoStreamURL(baseURL string, roomID string, zone string, token string) string {
+func ndsDemoStreamURL(baseURL string, roomID string, zone string, token string, player int, game string) string {
 	u, err := url.Parse(strings.TrimSpace(baseURL))
 	if err != nil || u.Scheme == "" || u.Host == "" {
 		u = &url.URL{Scheme: "http", Host: baseURL}
@@ -736,10 +736,13 @@ func ndsDemoStreamURL(baseURL string, roomID string, zone string, token string) 
 	u.Path = "/"
 	q := u.Query()
 	q.Set("id", roomID)
-	q.Set("player", "1")
+	q.Set("player", strconv.Itoa(player))
 	q.Set("client", "v9")
 	q.Set("view", "stream")
 	q.Set("token", token)
+	if game != "" {
+		q.Set("game", game)
+	}
 	if zone != "" {
 		q.Set("zone", zone)
 	}

@@ -125,6 +125,7 @@ func (h *Hub) auditNDSRoomClose(room *ndsRoomSession, reason string) {
 	if room.startedAt != nil && room.closedAt != nil {
 		duration = room.closedAt.Sub(*room.startedAt)
 	}
+	bytesStreamed := room.streamedBytes
 	room.mu.Unlock()
 
 	h.log.Info().
@@ -135,7 +136,7 @@ func (h *Hub) auditNDSRoomClose(room *ndsRoomSession, reason string) {
 		Str("reason", reason).
 		Strs("refs", refs).
 		Int64("duration_sec", int64(duration.Seconds())).
-		Int64("bytes_streamed", 0).
+		Int64("bytes_streamed", bytesStreamed).
 		Int64("save_bytes", saveBytes).
 		Msg("NDS room audit close")
 }

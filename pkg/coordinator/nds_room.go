@@ -47,6 +47,7 @@ type ndsRoomSession struct {
 	romPath        string
 	startedAt      *time.Time
 	state          string
+	streamedBytes  int64
 	updatedAt      time.Time
 }
 

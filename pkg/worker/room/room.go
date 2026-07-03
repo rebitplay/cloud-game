@@ -3,6 +3,7 @@ package room
 import (
 	"iter"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/giongto35/cloud-game/v3/pkg/worker/caged/app"
@@ -50,8 +51,9 @@ type Room[T Session] struct {
 	media MediaPipe
 	users SessionManager[T]
 
-	closed      bool
-	HandleClose func()
+	closed        bool
+	HandleClose   func()
+	streamedBytes atomic.Int64
 }
 
 func NewRoom[T Session](id string, app app.App, um SessionManager[T], media MediaPipe) *Room[T] {
@@ -71,14 +73,24 @@ func (r *Room[T]) InitMedia() {
 }
 
 func (r *Room[T]) sendAudio(data []byte, dur time.Duration) {
+	var bytes int64
 	for u := range r.users.Values() {
 		u.SendAudio(data, dur)
+		bytes += int64(len(data))
+	}
+	if bytes > 0 {
+		r.streamedBytes.Add(bytes)
 	}
 }
 
 func (r *Room[T]) sendVideo(data []byte, dur time.Duration) {
+	var bytes int64
 	for u := range r.users.Values() {
 		u.SendVideo(data, dur)
+		bytes += int64(len(data))
+	}
+	if bytes > 0 {
+		r.streamedBytes.Add(bytes)
 	}
 }
 
@@ -86,8 +98,14 @@ func (r *Room[T]) App() app.App         { return r.app }
 func (r *Room[T]) Id() string           { return r.id }
 func (r *Room[T]) SetApp(app app.App)   { r.app = app }
 func (r *Room[T]) SetMedia(m MediaPipe) { r.media = m }
-func (r *Room[T]) StartApp()            { r.app.Start() }
-func (r *Room[T]) AddUser(user T)       { r.users.Add(user) }
+func (r *Room[T]) StreamedBytes() int64 {
+	if r == nil {
+		return 0
+	}
+	return r.streamedBytes.Load()
+}
+func (r *Room[T]) StartApp()      { r.app.Start() }
+func (r *Room[T]) AddUser(user T) { r.users.Add(user) }
 func (r *Room[T]) RemoveUser(user T) int {
 	return r.users.RemoveL(user)
 }
