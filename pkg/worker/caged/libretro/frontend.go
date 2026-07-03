@@ -39,6 +39,7 @@ type Emulator interface {
 	// SetSessionId sets distinct name for the game session (in order to save/load it later)
 	SetSessionId(name string)
 	SaveGameState() error
+	SaveSRAMRaw() ([]byte, error)
 	SaveStateName() string
 	// HashPath returns the path emulator will save state to
 	HashPath() string
@@ -529,6 +530,21 @@ func (f *Frontend) Save() error {
 		sram = nil
 	}
 	return nil
+}
+
+func (f *Frontend) SaveSRAMRaw() ([]byte, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+
+	sram := nanoarch.SaveRAM()
+	if sram == nil {
+		return nil, nil
+	}
+	raw := append([]byte(nil), sram...)
+	if err := f.storage.Save(f.SRAMPath(), raw); err != nil {
+		return nil, err
+	}
+	return raw, nil
 }
 
 // Load restores the state from the filesystem.

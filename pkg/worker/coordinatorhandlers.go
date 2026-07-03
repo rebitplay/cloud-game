@@ -132,8 +132,11 @@ func (c *coordinator) HandleGameStart(rq api.StartGameRequest, w *Worker) api.Ou
 		app := room.WithEmulator(w.mana.Get(caged.Libretro))
 		app.ReloadFrontend()
 		app.SetSessionId(uid)
+		prepared, hasPrepared := w.consumePreparedSession(uid)
 		app.SetSaveOnClose(true)
-		app.EnableCloudStorage(uid, w.storage)
+		if !hasPrepared || prepared.SaveUploadURL == "" {
+			app.EnableCloudStorage(uid, w.storage)
+		}
 		app.EnableRecording(rq.Record, rq.RecordUser, gameName)
 
 		r.SetApp(app)
@@ -174,7 +177,7 @@ func (c *coordinator) HandleGameStart(rq api.StartGameRequest, w *Worker) api.Ou
 			w.router.SetRoom(nil)
 			return api.EmptyPacket
 		}
-		if w.consumePreparedSession(uid) && app.HasSave() {
+		if hasPrepared && app.HasSave() {
 			if err := app.RestoreGameState(); err != nil {
 				c.log.Error().Err(err).Str("room", uid).Msg("couldn't restore prepared NDS save")
 			}
@@ -202,6 +205,9 @@ func (c *coordinator) HandleGameStart(rq api.StartGameRequest, w *Worker) api.Ou
 
 		r.InitMedia()
 		r.StartApp()
+		if hasPrepared && prepared.SaveUploadURL != "" {
+			w.startNDSSaveUpload(uid, app, prepared)
+		}
 	}
 
 	needsKbMouse := r.App().KbMouseSupport()
@@ -258,7 +264,9 @@ func removeUserFromRoom(w *Worker, user *room.GameSession) {
 	}
 
 	user.RoomId = ""
+	w.flushNDSSaveUpload(r.Id())
 	if left := r.RemoveUser(user); left == 0 {
+		w.stopNDSSaveUpload(r.Id())
 		r.Close()
 		w.router.SetRoom(nil)
 	}

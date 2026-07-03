@@ -27,7 +27,11 @@ type Worker struct {
 	router   *room.GameRouter
 	prepared struct {
 		mu       sync.RWMutex
-		sessions map[string]struct{}
+		sessions map[string]preparedNDSSession
+	}
+	saveUploads struct {
+		mu      sync.Mutex
+		uploads map[string]*ndsSaveUpload
 	}
 	services [2]interface {
 		Run()
@@ -53,7 +57,8 @@ func New(conf config.WorkerConfig, log *logger.Logger) (*Worker, error) {
 		mana:     manager,
 		router:   room.NewGameRouter(),
 	}
-	worker.prepared.sessions = map[string]struct{}{}
+	worker.prepared.sessions = map[string]preparedNDSSession{}
+	worker.saveUploads.uploads = map[string]*ndsSaveUpload{}
 
 	h, err := httpx.NewServer(
 		conf.Worker.GetAddr(),

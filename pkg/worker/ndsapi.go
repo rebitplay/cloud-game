@@ -28,6 +28,12 @@ const (
 	defaultNDSROMCacheMaxBytes = 20 << 30
 )
 
+type preparedNDSSession struct {
+	Ref           string
+	SaveURL       string
+	SaveUploadURL string
+}
+
 func (c *coordinator) HandleNDSRomInstall(rq api.NDSRomInstallRequest, w *Worker) api.Out {
 	fileName := games.NDSFileName(rq.URL, rq.FileName, "game.nds")
 	gameName := games.GameNameFromFile(fileName)
@@ -111,8 +117,12 @@ func (c *coordinator) HandleNDSSessionPrepare(rq api.NDSSessionPrepareRequest, w
 			c.log.Error().Err(err).Str("room", rq.RoomID).Msg("cannot prepare NDS save")
 			return api.ErrPacket
 		}
-		w.markPreparedSession(rq.RoomID)
 	}
+	w.markPreparedSession(rq.RoomID, preparedNDSSession{
+		Ref:           rq.Ref,
+		SaveURL:       rq.SaveURL,
+		SaveUploadURL: rq.SaveUploadURL,
+	})
 	return api.OkPacket
 }
 
@@ -149,21 +159,22 @@ func (w *Worker) installNDSSave(roomID string, rawURL string) error {
 	return stdos.WriteFile(filepath.Join(w.conf.Emulator.Storage, name), data, 0644)
 }
 
-func (w *Worker) markPreparedSession(roomID string) {
+func (w *Worker) markPreparedSession(roomID string, session preparedNDSSession) {
 	w.prepared.mu.Lock()
-	w.prepared.sessions[roomID] = struct{}{}
+	w.prepared.sessions[roomID] = session
 	w.prepared.mu.Unlock()
 }
 
-func (w *Worker) consumePreparedSession(roomID string) bool {
+func (w *Worker) consumePreparedSession(roomID string) (preparedNDSSession, bool) {
 	w.prepared.mu.Lock()
 	defer w.prepared.mu.Unlock()
 
-	if _, ok := w.prepared.sessions[roomID]; !ok {
-		return false
+	session, ok := w.prepared.sessions[roomID]
+	if !ok {
+		return preparedNDSSession{}, false
 	}
 	delete(w.prepared.sessions, roomID)
-	return true
+	return session, true
 }
 
 func downloadURLToFile(rawURL string, path string, limit int64) error {

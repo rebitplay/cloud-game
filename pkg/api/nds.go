@@ -115,7 +115,9 @@ type (
 	}
 
 	NDSSessionPrepareRequest struct {
-		RoomID  string `json:"room_id"`
-		SaveURL string `json:"save_url,omitempty"`
+		Ref           string `json:"ref,omitempty"`
+		RoomID        string `json:"room_id"`
+		SaveURL       string `json:"save_url,omitempty"`
+		SaveUploadURL string `json:"save_upload_url,omitempty"`
 	}
 )

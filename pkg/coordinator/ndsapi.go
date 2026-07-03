@@ -199,12 +199,11 @@ func (h *Hub) createNDSRoomV1(req api.NDSRoomCreateRequest) (api.NDSRoomV1Respon
 			continue
 		}
 		saveURL := slots[slot.player].SaveURL
-		if saveURL == "" {
-			continue
-		}
 		resp, err := slot.worker.PrepareNDSSession(api.NDSSessionPrepareRequest{
-			RoomID:  slot.roomID,
-			SaveURL: saveURL,
+			Ref:           slots[slot.player].Ref,
+			RoomID:        slot.roomID,
+			SaveURL:       saveURL,
+			SaveUploadURL: slots[slot.player].SaveUploadURL,
 		})
 		if err != nil || resp == nil || *resp != api.OK {
 			return api.NDSRoomV1Response{}, 0, apiInternal(fmt.Sprintf("worker %s could not prepare save for player %d", slot.worker.Id().String(), slot.player))
