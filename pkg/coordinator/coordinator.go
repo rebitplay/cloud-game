@@ -27,7 +27,10 @@ func New(conf config.CoordinatorConfig, log *logger.Logger) (*Coordinator, error
 		return nil, err
 	}
 	h, err := NewHTTPServer(conf, log, func(mux *httpx.Mux) *httpx.Mux {
-		mux.HandleFunc("/api/nds/rooms", coordinator.hub.handleNDSRoomCreate())
+		mux.HandleFunc("/healthz", coordinator.hub.handleHealthz())
+		mux.HandleFunc("/v1/capacity", coordinator.hub.requireNDSAPIKey(coordinator.hub.handleNDSCapacity()))
+		mux.HandleFunc("/v1/rooms", coordinator.hub.requireNDSAPIKey(coordinator.hub.handleNDSRooms()))
+		mux.HandleFunc("/v1/rooms/", coordinator.hub.requireNDSAPIKey(coordinator.hub.handleNDSRoomByID()))
 		mux.HandleFunc("/ws", coordinator.hub.handleUserConnection())
 		mux.HandleFunc("/wso", coordinator.hub.handleWorkerConnection())
 		return mux

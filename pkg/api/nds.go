@@ -1,13 +1,34 @@
 package api
 
+import "time"
+
 type (
 	NDSRoomCreateRequest struct {
-		BaseURL string                 `json:"base_url,omitempty"`
-		Players int                    `json:"players"`
-		Room    string                 `json:"room,omitempty"`
-		RomName string                 `json:"rom_name,omitempty"`
-		RomURL  string                 `json:"rom_url"`
-		Saves   []NDSPlayerSaveRequest `json:"saves,omitempty"`
+		Options     NDSRoomOptions        `json:"options,omitempty"`
+		PlayerSlots []NDSPlayerSlotCreate `json:"player_slots"`
+		Players     int                   `json:"players"`
+		Room        string                `json:"room"`
+		Rom         NDSRomCreate          `json:"rom"`
+	}
+
+	NDSRomCreate struct {
+		Name string `json:"name"`
+		SHA1 string `json:"sha1"`
+		URL  string `json:"url"`
+	}
+
+	NDSRoomOptions struct {
+		IdleTimeoutSec int    `json:"idle_timeout_sec,omitempty"`
+		JoinTimeoutSec int    `json:"join_timeout_sec,omitempty"`
+		MaxDurationSec int    `json:"max_duration_sec,omitempty"`
+		VideoCodec     string `json:"video_codec,omitempty"`
+	}
+
+	NDSPlayerSlotCreate struct {
+		Player        int    `json:"player"`
+		Ref           string `json:"ref"`
+		SaveURL       string `json:"save_url,omitempty"`
+		SaveUploadURL string `json:"save_upload_url"`
 	}
 
 	NDSPlayerSaveRequest struct {
@@ -32,8 +53,59 @@ type (
 		Zone   string `json:"zone,omitempty"`
 	}
 
+	NDSRoomV1Response struct {
+		Endpoint     string              `json:"endpoint"`
+		Game         string              `json:"game"`
+		JoinDeadline time.Time           `json:"join_deadline"`
+		Players      []NDSPlayerJoinInfo `json:"players"`
+		RoomID       string              `json:"room_id"`
+		State        string              `json:"state"`
+	}
+
+	NDSPlayerJoinInfo struct {
+		IceServers   []IceServer `json:"ice_servers"`
+		Player       int         `json:"player"`
+		Ref          string      `json:"ref"`
+		SignalingURL string      `json:"signaling_url"`
+		Token        string      `json:"token"`
+	}
+
+	NDSRoomStateResponse struct {
+		ClosedAt  *time.Time       `json:"closed_at,omitempty"`
+		CreatedAt time.Time        `json:"created_at"`
+		Endpoint  string           `json:"endpoint"`
+		Game      string           `json:"game"`
+		Players   []NDSPlayerState `json:"players"`
+		RoomID    string           `json:"room_id"`
+		StartedAt *time.Time       `json:"started_at,omitempty"`
+		State     string           `json:"state"`
+		UpdatedAt time.Time        `json:"updated_at"`
+	}
+
+	NDSPlayerState struct {
+		Connected   bool       `json:"connected"`
+		ConnectedAt *time.Time `json:"connected_at,omitempty"`
+		LastSaveAt  *time.Time `json:"last_save_at,omitempty"`
+		LastSeen    *time.Time `json:"last_seen,omitempty"`
+		Player      int        `json:"player"`
+		Ref         string     `json:"ref"`
+	}
+
+	NDSCapacityResponse struct {
+		ByPlayers  map[string]int `json:"by_players"`
+		FreeRooms  int            `json:"free_rooms"`
+		TotalRooms int            `json:"total_rooms"`
+	}
+
+	NDSAPIError struct {
+		Code          string `json:"code"`
+		Error         string `json:"error"`
+		RetryAfterSec int    `json:"retry_after_sec,omitempty"`
+	}
+
 	NDSRomInstallRequest struct {
 		FileName string `json:"file_name"`
+		SHA1     string `json:"sha1,omitempty"`
 		URL      string `json:"url"`
 	}
 

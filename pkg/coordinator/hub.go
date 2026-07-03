@@ -25,6 +25,7 @@ type Hub struct {
 	conf       config.CoordinatorConfig
 	log        *logger.Logger
 	ndsSpawner *ndsSpawner
+	ndsRooms   *ndsRoomRegistry
 	users      com.NetMap[com.Uid, *User]
 	webrtcMux  *webRTCMux
 	workers    com.NetMap[com.Uid, *Worker]
@@ -36,6 +37,7 @@ func NewHub(conf config.CoordinatorConfig, log *logger.Logger) *Hub {
 		users:      com.NewNetMap[com.Uid, *User](),
 		workers:    com.NewNetMap[com.Uid, *Worker](),
 		ndsSpawner: newNDSSpawnerFromEnv(log),
+		ndsRooms:   newNDSRoomRegistry(),
 		log:        log,
 	}
 }

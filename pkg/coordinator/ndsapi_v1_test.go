@@ -1,0 +1,178 @@
+package coordinator
+
+import (
+	"bytes"
+	"encoding/json"
+	"net/http"
+	"net/http/httptest"
+	"strconv"
+	"strings"
+	"testing"
+
+	"github.com/giongto35/cloud-game/v3/pkg/api"
+	"github.com/giongto35/cloud-game/v3/pkg/com"
+	"github.com/giongto35/cloud-game/v3/pkg/config"
+	"github.com/giongto35/cloud-game/v3/pkg/logger"
+)
+
+type fakeNDSConnection struct {
+	id com.Uid
+}
+
+func (f *fakeNDSConnection) Disconnect()        {}
+func (f *fakeNDSConnection) Id() com.Uid        { return f.id }
+func (f *fakeNDSConnection) Notify(api.PT, any) {}
+func (f *fakeNDSConnection) ProcessPackets(func(api.In[com.Uid]) error) chan struct{} {
+	done := make(chan struct{})
+	close(done)
+	return done
+}
+func (f *fakeNDSConnection) Send(t api.PT, payload any) ([]byte, error) {
+	switch t {
+	case api.NDSRomInstall:
+		req := payload.(api.NDSRomInstallRequest)
+		return json.Marshal(api.NDSRomInstallResponse{Game: "Tetris DS", Path: "nds/" + req.FileName})
+	case api.NDSSessionPrepare:
+		return json.Marshal(api.OK)
+	default:
+		return json.Marshal(api.OK)
+	}
+}
+
+func TestNDSV1AuthAndHealthz(t *testing.T) {
+	t.Setenv("NDS_API_KEY", "test-key")
+
+	h := testNDSHub(t, 1)
+
+	health := httptest.NewRecorder()
+	h.handleHealthz()(health, httptest.NewRequest(http.MethodGet, "/healthz", nil))
+	if health.Code != http.StatusNoContent {
+		t.Fatalf("healthz status = %d, want %d", health.Code, http.StatusNoContent)
+	}
+
+	noAuth := httptest.NewRecorder()
+	h.requireNDSAPIKey(h.handleNDSCapacity())(noAuth, httptest.NewRequest(http.MethodGet, "/v1/capacity", nil))
+	if noAuth.Code != http.StatusUnauthorized {
+		t.Fatalf("capacity without auth status = %d, want %d", noAuth.Code, http.StatusUnauthorized)
+	}
+
+	withAuth := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/v1/capacity", nil)
+	req.Header.Set("Authorization", "Bearer test-key")
+	h.requireNDSAPIKey(h.handleNDSCapacity())(withAuth, req)
+	if withAuth.Code != http.StatusOK {
+		t.Fatalf("capacity with auth status = %d, want %d; body=%s", withAuth.Code, http.StatusOK, withAuth.Body.String())
+	}
+}
+
+func TestNDSV1CreateIsIdempotentAndUsesPublicEndpoint(t *testing.T) {
+	t.Setenv("NDS_API_KEY", "test-key")
+	t.Setenv("NDS_TOKEN_SECRET", "token-secret")
+	t.Setenv("NDS_PUBLIC_ENDPOINT", "https://sg-1.nds.rebitplay.com")
+
+	h := testNDSHub(t, 1)
+	body := testNDSCreateBody("room-123", 3)
+
+	first := postNDSRoom(t, h, body)
+	if first.Code != http.StatusCreated {
+		t.Fatalf("first create status = %d, want %d; body=%s", first.Code, http.StatusCreated, first.Body.String())
+	}
+	var firstResp api.NDSRoomV1Response
+	if err := json.Unmarshal(first.Body.Bytes(), &firstResp); err != nil {
+		t.Fatal(err)
+	}
+	if firstResp.Endpoint != "https://sg-1.nds.rebitplay.com" {
+		t.Fatalf("endpoint = %q", firstResp.Endpoint)
+	}
+	if len(firstResp.Players) != 3 {
+		t.Fatalf("players = %d, want 3", len(firstResp.Players))
+	}
+	if !strings.HasPrefix(firstResp.Players[0].SignalingURL, "wss://sg-1.nds.rebitplay.com/ws?") {
+		t.Fatalf("signaling_url not built from NDS_PUBLIC_ENDPOINT: %q", firstResp.Players[0].SignalingURL)
+	}
+
+	second := postNDSRoom(t, h, body)
+	if second.Code != http.StatusOK {
+		t.Fatalf("second create status = %d, want %d; body=%s", second.Code, http.StatusOK, second.Body.String())
+	}
+	var secondResp api.NDSRoomV1Response
+	if err := json.Unmarshal(second.Body.Bytes(), &secondResp); err != nil {
+		t.Fatal(err)
+	}
+	if secondResp.RoomID != firstResp.RoomID || secondResp.Players[0].Token == firstResp.Players[0].Token {
+		t.Fatalf("idempotent replay should keep room and mint fresh token")
+	}
+}
+
+func TestNDSV1CreateValidationAndCapacityErrors(t *testing.T) {
+	t.Setenv("NDS_API_KEY", "test-key")
+	t.Setenv("NDS_TOKEN_SECRET", "token-secret")
+	t.Setenv("NDS_PUBLIC_ENDPOINT", "https://sg-1.nds.rebitplay.com")
+
+	h := testNDSHub(t, 0)
+	tooManyPlayers := postNDSRoom(t, h, testNDSCreateBody("room-123", 5))
+	if tooManyPlayers.Code != http.StatusBadRequest {
+		t.Fatalf("bad players status = %d, want %d", tooManyPlayers.Code, http.StatusBadRequest)
+	}
+
+	noCapacity := postNDSRoom(t, h, testNDSCreateBody("room-124", 2))
+	if noCapacity.Code != http.StatusServiceUnavailable {
+		t.Fatalf("no capacity status = %d, want %d; body=%s", noCapacity.Code, http.StatusServiceUnavailable, noCapacity.Body.String())
+	}
+	var errResp api.NDSAPIError
+	if err := json.Unmarshal(noCapacity.Body.Bytes(), &errResp); err != nil {
+		t.Fatal(err)
+	}
+	if errResp.Code != "no_capacity" || errResp.RetryAfterSec == 0 {
+		t.Fatalf("unexpected no_capacity body: %#v", errResp)
+	}
+}
+
+func testNDSHub(t *testing.T, groups int) *Hub {
+	t.Helper()
+	h := NewHub(config.CoordinatorConfig{}, logger.NewConsole(false, "test", false))
+	for group := 1; group <= groups; group++ {
+		groupID := "mkds-r" + strconv.Itoa(group)
+		for player := 1; player <= 4; player++ {
+			worker := &Worker{
+				Connection: &fakeNDSConnection{id: com.NewUid()},
+				NDSGroup:   groupID,
+				NDSPlayer:  player,
+				Zone:       groupID + "-p" + strconv.Itoa(player),
+			}
+			h.workers.Add(worker)
+		}
+	}
+	return h
+}
+
+func testNDSCreateBody(room string, players int) []byte {
+	req := api.NDSRoomCreateRequest{
+		Room:    room,
+		Players: players,
+		Rom: api.NDSRomCreate{
+			Name: "Tetris DS (USA).nds",
+			SHA1: "0123456789abcdef0123456789abcdef01234567",
+			URL:  "https://cdn.rebitplay.com/roms/tetris.nds?token=x",
+		},
+	}
+	for player := 1; player <= players && player <= 4; player++ {
+		req.PlayerSlots = append(req.PlayerSlots, api.NDSPlayerSlotCreate{
+			Player:        player,
+			Ref:           "user_" + strconv.Itoa(player),
+			SaveUploadURL: "https://cdn.rebitplay.com/saves/u" + strconv.Itoa(player) + ".srm?token=x",
+		})
+	}
+	body, _ := json.Marshal(req)
+	return body
+}
+
+func postNDSRoom(t *testing.T, h *Hub, body []byte) *httptest.ResponseRecorder {
+	t.Helper()
+	rr := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/v1/rooms", bytes.NewReader(body))
+	req.Host = "attacker.example"
+	req.Header.Set("Authorization", "Bearer test-key")
+	h.requireNDSAPIKey(h.handleNDSRooms())(rr, req)
+	return rr
+}

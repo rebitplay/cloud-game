@@ -4,13 +4,13 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
-	"net/url"
+	"regexp"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
 	"github.com/giongto35/cloud-game/v3/pkg/api"
-	"github.com/giongto35/cloud-game/v3/pkg/com"
 	"github.com/giongto35/cloud-game/v3/pkg/games"
 )
 
@@ -21,7 +21,17 @@ type reservedNDSWorker struct {
 	worker *Worker
 }
 
-const ndsReservationTTL = 10 * time.Minute
+const (
+	defaultNDSJoinTimeoutSec = 600
+	defaultNDSIdleTimeoutSec = 300
+	defaultNDSMaxDurationSec = 14400
+	maxNDSDurationSec        = 21600
+)
+
+var (
+	ndsRoomIDPattern = regexp.MustCompile(`^[a-z0-9-]{4,64}$`)
+	ndsSHA1Pattern   = regexp.MustCompile(`^[a-fA-F0-9]{40}$`)
+)
 
 type ndsWorkerGroup struct {
 	id      string
@@ -29,65 +39,136 @@ type ndsWorkerGroup struct {
 	workers map[int]*Worker
 }
 
-func (h *Hub) handleNDSRoomCreate() http.HandlerFunc {
+func (h *Hub) handleHealthz() http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		setAPIHeaders(w)
-		if r.Method == http.MethodOptions {
-			w.WriteHeader(http.StatusNoContent)
+		if r.Method != http.MethodGet {
+			writeAPIError(w, http.StatusMethodNotAllowed, "method_not_allowed", "method not allowed")
+			return
+		}
+		w.WriteHeader(http.StatusNoContent)
+	}
+}
+
+func (h *Hub) handleNDSRooms() http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/v1/rooms" {
+			writeAPIError(w, http.StatusNotFound, "not_found", "route not found")
 			return
 		}
 		if r.Method != http.MethodPost {
-			writeAPIError(w, http.StatusMethodNotAllowed, "method not allowed")
+			writeAPIError(w, http.StatusMethodNotAllowed, "method_not_allowed", "method not allowed")
 			return
 		}
-
 		var req api.NDSRoomCreateRequest
 		dec := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<20))
 		dec.DisallowUnknownFields()
 		if err := dec.Decode(&req); err != nil {
-			writeAPIError(w, http.StatusBadRequest, "invalid JSON request")
+			writeAPIError(w, http.StatusBadRequest, "invalid_json", "invalid JSON request")
 			return
 		}
 
-		resp, err := h.createNDSRoom(r, req)
+		resp, status, err := h.createNDSRoomV1(req)
 		if err != nil {
-			status := http.StatusInternalServerError
-			if errorsIsBadRequest(err) {
-				status = http.StatusBadRequest
-			} else if errorsIsConflict(err) {
-				status = http.StatusConflict
-			}
-			writeAPIError(w, status, err.Error())
+			writeAPIErrorFromErr(w, err)
 			return
 		}
-		writeAPIJSON(w, http.StatusCreated, resp)
+		writeAPIJSON(w, status, resp)
 	}
 }
 
-func (h *Hub) createNDSRoom(r *http.Request, req api.NDSRoomCreateRequest) (api.NDSRoomCreateResponse, error) {
-	if req.Players < 2 || req.Players > 4 {
-		return api.NDSRoomCreateResponse{}, badAPIRequest("players must be 2, 3, or 4")
+func (h *Hub) handleNDSRoomByID() http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		parts := strings.Split(strings.TrimPrefix(r.URL.Path, "/v1/rooms/"), "/")
+		if len(parts) == 0 || parts[0] == "" {
+			writeAPIError(w, http.StatusNotFound, "not_found", "room not found")
+			return
+		}
+		roomID := parts[0]
+		if len(parts) == 1 {
+			switch r.Method {
+			case http.MethodGet:
+				h.handleNDSRoomGet(w, roomID)
+			case http.MethodDelete:
+				h.handleNDSRoomDelete(w, roomID)
+			default:
+				writeAPIError(w, http.StatusMethodNotAllowed, "method_not_allowed", "method not allowed")
+			}
+			return
+		}
+		if len(parts) == 4 && parts[1] == "players" && parts[3] == "token" && r.Method == http.MethodPost {
+			player, err := strconv.Atoi(parts[2])
+			if err != nil {
+				writeAPIError(w, http.StatusBadRequest, "invalid_player", "player must be an integer")
+				return
+			}
+			h.handleNDSRoomPlayerToken(w, roomID, player)
+			return
+		}
+		writeAPIError(w, http.StatusNotFound, "not_found", "route not found")
 	}
-	if strings.TrimSpace(req.RomURL) == "" {
-		return api.NDSRoomCreateResponse{}, badAPIRequest("rom_url is required")
+}
+
+func (h *Hub) handleNDSCapacity() http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet {
+			writeAPIError(w, http.StatusMethodNotAllowed, "method_not_allowed", "method not allowed")
+			return
+		}
+		byPlayers := map[string]int{"2": 0, "3": 0, "4": 0}
+		for _, group := range h.ndsWorkerGroups() {
+			for players := 2; players <= 4; players++ {
+				if group.canHost(players) {
+					byPlayers[strconv.Itoa(players)]++
+				}
+			}
+		}
+		writeAPIJSON(w, http.StatusOK, api.NDSCapacityResponse{
+			ByPlayers:  byPlayers,
+			FreeRooms:  byPlayers["4"],
+			TotalRooms: envInt("NDS_MAX_ROOM_COUNT", len(h.ndsWorkerGroups())),
+		})
+	}
+}
+
+func (h *Hub) createNDSRoomV1(req api.NDSRoomCreateRequest) (api.NDSRoomV1Response, int, error) {
+	if err := validateNDSRoomCreate(req); err != nil {
+		return api.NDSRoomV1Response{}, 0, err
 	}
 
-	fileName := games.NDSFileName(req.RomURL, req.RomName, "game.nds")
+	now := time.Now().UTC()
+	if existing := h.ndsRooms.live(req.Room); existing != nil {
+		resp, err := existing.response(h.conf.Webrtc.IceServers, now)
+		if err != nil {
+			return api.NDSRoomV1Response{}, 0, apiInternal(err.Error())
+		}
+		return resp, http.StatusOK, nil
+	}
+
+	endpoint := strings.TrimRight(envString("NDS_PUBLIC_ENDPOINT", ""), "/")
+	if endpoint == "" {
+		return api.NDSRoomV1Response{}, 0, apiInternal("NDS_PUBLIC_ENDPOINT is not configured")
+	}
+
+	fileName := games.NDSFileName(req.Rom.URL, req.Rom.Name, "game.nds")
 	gameName := games.GameNameFromFile(fileName)
-	roomBase := cleanRoomBase(req.Room)
-	if roomBase == "" {
-		roomBase = "nds-" + com.NewUid().String()
+	roomID := req.Room
+	joinTimeout := req.Options.JoinTimeoutSec
+	if joinTimeout <= 0 {
+		joinTimeout = defaultNDSJoinTimeoutSec
 	}
 
-	reserved, groupID, err := h.reserveNDSGroup(req.Players, roomBase, gameName)
+	reserved, groupID, err := h.reserveNDSGroup(req.Players, roomID, gameName)
 	if err != nil && isNDSCapacityConflict(err) {
 		if spawnErr := h.spawnNDSGroup(req.Players); spawnErr != nil {
-			return api.NDSRoomCreateResponse{}, spawnErr
+			return api.NDSRoomV1Response{}, 0, noCapacityAPIError("no free NDS worker groups")
 		}
-		reserved, groupID, err = h.reserveNDSGroup(req.Players, roomBase, gameName)
+		reserved, groupID, err = h.reserveNDSGroup(req.Players, roomID, gameName)
 	}
 	if err != nil {
-		return api.NDSRoomCreateResponse{}, err
+		if isNDSCapacityConflict(err) {
+			return api.NDSRoomV1Response{}, 0, noCapacityAPIError("no free NDS worker groups")
+		}
+		return api.NDSRoomV1Response{}, 0, err
 	}
 	releaseOnFailure := true
 	defer func() {
@@ -96,7 +177,7 @@ func (h *Hub) createNDSRoom(r *http.Request, req api.NDSRoomCreateRequest) (api.
 		}
 	}()
 
-	installReq := api.NDSRomInstallRequest{URL: req.RomURL, FileName: fileName}
+	installReq := api.NDSRomInstallRequest{URL: req.Rom.URL, FileName: fileName, SHA1: strings.ToLower(req.Rom.SHA1)}
 	romPath := "nds/" + fileName
 	for _, slot := range reserved {
 		if !slot.stream {
@@ -104,7 +185,7 @@ func (h *Hub) createNDSRoom(r *http.Request, req api.NDSRoomCreateRequest) (api.
 		}
 		resp, err := slot.worker.InstallNDSRom(installReq)
 		if err != nil || resp == nil || resp.Game == "" {
-			return api.NDSRoomCreateResponse{}, fmt.Errorf("worker %s could not install ROM", slot.worker.Id().String())
+			return api.NDSRoomV1Response{}, 0, apiInternal(fmt.Sprintf("worker %s could not install ROM", slot.worker.Id().String()))
 		}
 		gameName = resp.Game
 		if resp.Path != "" {
@@ -112,15 +193,12 @@ func (h *Hub) createNDSRoom(r *http.Request, req api.NDSRoomCreateRequest) (api.
 		}
 	}
 
-	saveURLs, err := playerSaveURLs(req.Saves, req.Players)
-	if err != nil {
-		return api.NDSRoomCreateResponse{}, err
-	}
+	slots := playerSlotsByNumber(req.PlayerSlots)
 	for _, slot := range reserved {
 		if !slot.stream {
 			continue
 		}
-		saveURL := saveURLs[slot.player]
+		saveURL := slots[slot.player].SaveURL
 		if saveURL == "" {
 			continue
 		}
@@ -129,34 +207,143 @@ func (h *Hub) createNDSRoom(r *http.Request, req api.NDSRoomCreateRequest) (api.
 			SaveURL: saveURL,
 		})
 		if err != nil || resp == nil || *resp != api.OK {
-			return api.NDSRoomCreateResponse{}, fmt.Errorf("worker %s could not prepare save for player %d", slot.worker.Id().String(), slot.player)
+			return api.NDSRoomV1Response{}, 0, apiInternal(fmt.Sprintf("worker %s could not prepare save for player %d", slot.worker.Id().String(), slot.player))
 		}
 	}
 
-	baseURL := publicBaseURL(r, req.BaseURL)
-	players := make([]api.NDSPlayerStream, 0, len(reserved))
+	players := make(map[int]*ndsSeat, req.Players)
 	for _, slot := range reserved {
 		if !slot.stream {
 			continue
 		}
-		players = append(players, api.NDSPlayerStream{
-			Group:  groupID,
-			Player: slot.player,
-			RoomID: slot.roomID,
-			URL:    streamURL(baseURL, slot.roomID, slot.worker.Zone),
-			Zone:   slot.worker.Zone,
-		})
+		slotReq := slots[slot.player]
+		players[slot.player] = &ndsSeat{
+			player:        slot.player,
+			ref:           slotReq.Ref,
+			roomID:        slot.roomID,
+			saveURL:       slotReq.SaveURL,
+			saveUploadURL: slotReq.SaveUploadURL,
+			worker:        slot.worker,
+		}
 	}
 
+	session := &ndsRoomSession{
+		createdAt:    now,
+		endpoint:     endpoint,
+		game:         gameName,
+		groupID:      groupID,
+		joinDeadline: now.Add(time.Duration(joinTimeout) * time.Second),
+		players:      players,
+		reserved:     reserved,
+		roomID:       roomID,
+		romPath:      romPath,
+		state:        ndsRoomReady,
+		updatedAt:    now,
+	}
+	h.ndsRooms.put(session)
+
 	releaseOnFailure = false
-	h.scheduleNDSReservationExpiry(reserved)
-	return api.NDSRoomCreateResponse{
-		Group:   groupID,
-		Game:    gameName,
-		Players: players,
-		Room:    roomBase,
-		Rom:     romPath,
-	}, nil
+	resp, err := session.response(h.conf.Webrtc.IceServers, now)
+	if err != nil {
+		return api.NDSRoomV1Response{}, 0, apiInternal(err.Error())
+	}
+	return resp, http.StatusCreated, nil
+}
+
+func (h *Hub) handleNDSRoomGet(w http.ResponseWriter, roomID string) {
+	room := h.ndsRooms.get(roomID)
+	if room == nil || room.state == ndsRoomClosed {
+		writeAPIError(w, http.StatusNotFound, "room_not_found", "room not found")
+		return
+	}
+	writeAPIJSON(w, http.StatusOK, room.stateResponse())
+}
+
+func (h *Hub) handleNDSRoomDelete(w http.ResponseWriter, roomID string) {
+	now := time.Now().UTC()
+	room := h.ndsRooms.close(roomID, now)
+	if room == nil {
+		writeAPIError(w, http.StatusNotFound, "room_not_found", "room not found")
+		return
+	}
+	releaseNDSReservations(room.reserved)
+	writeAPIJSON(w, http.StatusAccepted, room.stateResponse())
+}
+
+func (h *Hub) handleNDSRoomPlayerToken(w http.ResponseWriter, roomID string, player int) {
+	room := h.ndsRooms.live(roomID)
+	if room == nil {
+		writeAPIError(w, http.StatusNotFound, "room_not_found", "room not found")
+		return
+	}
+	resp, ok, err := room.tokenResponse(player, h.conf.Webrtc.IceServers, time.Now().UTC())
+	if err != nil {
+		writeAPIError(w, http.StatusInternalServerError, "token_error", err.Error())
+		return
+	}
+	if !ok {
+		writeAPIError(w, http.StatusNotFound, "player_not_found", "player not found")
+		return
+	}
+	writeAPIJSON(w, http.StatusOK, resp)
+}
+
+func validateNDSRoomCreate(req api.NDSRoomCreateRequest) error {
+	if !ndsRoomIDPattern.MatchString(req.Room) {
+		return badAPIRequest("invalid_room", "room must match [a-z0-9-]{4,64}")
+	}
+	if req.Players < 2 || req.Players > 4 {
+		return badAPIRequest("invalid_players", "players must be 2, 3, or 4")
+	}
+	if strings.TrimSpace(req.Rom.URL) == "" {
+		return badAPIRequest("invalid_rom_url", "rom.url is required")
+	}
+	if strings.TrimSpace(req.Rom.Name) == "" {
+		return badAPIRequest("invalid_rom_name", "rom.name is required")
+	}
+	if !ndsSHA1Pattern.MatchString(req.Rom.SHA1) {
+		return badAPIRequest("invalid_rom_sha1", "rom.sha1 must be a 40-character hex string")
+	}
+	if len(req.PlayerSlots) != req.Players {
+		return badAPIRequest("invalid_player_slots", "player_slots must contain exactly players entries")
+	}
+	seen := map[int]struct{}{}
+	for _, slot := range req.PlayerSlots {
+		if slot.Player < 1 || slot.Player > req.Players {
+			return badAPIRequest("invalid_player", fmt.Sprintf("player must be between 1 and %d", req.Players))
+		}
+		if _, ok := seen[slot.Player]; ok {
+			return badAPIRequest("duplicate_player", "player_slots contains duplicate player")
+		}
+		seen[slot.Player] = struct{}{}
+		if strings.TrimSpace(slot.Ref) == "" {
+			return badAPIRequest("invalid_ref", "player ref is required")
+		}
+		if strings.TrimSpace(slot.SaveUploadURL) == "" {
+			return badAPIRequest("invalid_save_upload_url", "save_upload_url is required")
+		}
+	}
+	if req.Options.VideoCodec != "" && req.Options.VideoCodec != "h264" && req.Options.VideoCodec != "vp8" {
+		return badAPIRequest("invalid_video_codec", "video_codec must be h264 or vp8")
+	}
+	if req.Options.MaxDurationSec > maxNDSDurationSec {
+		return badAPIRequest("invalid_max_duration", fmt.Sprintf("max_duration_sec must be <= %d", maxNDSDurationSec))
+	}
+	if req.Options.MaxDurationSec < 0 || req.Options.IdleTimeoutSec < 0 || req.Options.JoinTimeoutSec < 0 {
+		return badAPIRequest("invalid_timeout", "timeout values must be positive")
+	}
+	return nil
+}
+
+func playerSlotsByNumber(slots []api.NDSPlayerSlotCreate) map[int]api.NDSPlayerSlotCreate {
+	out := make(map[int]api.NDSPlayerSlotCreate, len(slots))
+	for _, slot := range slots {
+		slot.Ref = strings.TrimSpace(slot.Ref)
+		slot.SaveURL = strings.TrimSpace(slot.SaveURL)
+		slot.SaveUploadURL = strings.TrimSpace(slot.SaveUploadURL)
+		out[slot.Player] = slot
+	}
+	return out
 }
 
 func (h *Hub) reserveNDSGroup(players int, roomBase string, gameName string) ([]reservedNDSWorker, string, error) {
@@ -301,87 +488,25 @@ func releaseNDSReservations(reserved []reservedNDSWorker) {
 	}
 }
 
-func (h *Hub) scheduleNDSReservationExpiry(reserved []reservedNDSWorker) {
-	for _, slot := range reserved {
-		slot := slot
-		time.AfterFunc(ndsReservationTTL, func() {
-			if slot.worker.ReleaseReservation(slot.roomID) {
-				h.log.Info().Str("room", slot.roomID).Msg("expired pending NDS room reservation")
-			}
-		})
-	}
+type apiError struct {
+	code     string
+	message  string
+	retrySec int
+	status   int
 }
 
-func playerSaveURLs(saves []api.NDSPlayerSaveRequest, players int) (map[int]string, error) {
-	out := map[int]string{}
-	for _, save := range saves {
-		if save.Player < 1 || save.Player > players {
-			return nil, badAPIRequest(fmt.Sprintf("save player must be between 1 and %d", players))
-		}
-		saveURL := strings.TrimSpace(save.SRMURL)
-		if saveURL == "" {
-			saveURL = strings.TrimSpace(save.SaveURL)
-		}
-		if saveURL != "" {
-			out[save.Player] = saveURL
-		}
-	}
-	return out, nil
+func (e apiError) Error() string { return e.message }
+
+func badAPIRequest(code string, message string) apiError {
+	return apiError{code: code, message: message, status: http.StatusBadRequest}
 }
 
-func streamURL(baseURL string, roomID string, zone string) string {
-	u, err := url.Parse(baseURL)
-	if err != nil || u.Scheme == "" || u.Host == "" {
-		u = &url.URL{Scheme: "http", Host: baseURL}
-	}
-	u.Path = "/"
-	q := u.Query()
-	q.Set("id", roomID)
-	q.Set("player", "1")
-	q.Set("client", "v7")
-	q.Set("view", "stream")
-	if zone != "" {
-		q.Set("zone", zone)
-	}
-	u.RawQuery = q.Encode()
-	return u.String()
+func apiInternal(message string) apiError {
+	return apiError{code: "internal_error", message: message, status: http.StatusInternalServerError}
 }
 
-func publicBaseURL(r *http.Request, override string) string {
-	if override = strings.TrimSpace(override); override != "" {
-		return strings.TrimRight(override, "/")
-	}
-	scheme := r.Header.Get("X-Forwarded-Proto")
-	if scheme == "" {
-		if r.TLS != nil {
-			scheme = "https"
-		} else {
-			scheme = "http"
-		}
-	}
-	host := r.Header.Get("X-Forwarded-Host")
-	if host == "" {
-		host = r.Host
-	}
-	return scheme + "://" + host
-}
-
-func cleanRoomBase(room string) string {
-	room = games.SafeName(room, "")
-	room = strings.ReplaceAll(room, " ", "-")
-	for strings.Contains(room, "___") {
-		room = strings.ReplaceAll(room, "___", "_")
-	}
-	return room
-}
-
-type badAPIRequest string
-
-func (e badAPIRequest) Error() string { return string(e) }
-
-func errorsIsBadRequest(err error) bool {
-	_, ok := err.(badAPIRequest)
-	return ok
+func noCapacityAPIError(message string) apiError {
+	return apiError{code: "no_capacity", message: message, retrySec: 15, status: http.StatusServiceUnavailable}
 }
 
 type apiConflict string
@@ -397,18 +522,20 @@ func isNDSCapacityConflict(err error) bool {
 	return errorsIsConflict(err) && strings.HasPrefix(err.Error(), "not enough free NDS groups")
 }
 
-func setAPIHeaders(w http.ResponseWriter) {
-	w.Header().Set("Access-Control-Allow-Origin", "*")
-	w.Header().Set("Access-Control-Allow-Methods", "POST, OPTIONS")
-	w.Header().Set("Access-Control-Allow-Headers", "Content-Type")
-}
-
 func writeAPIJSON(w http.ResponseWriter, status int, payload any) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
 	_ = json.NewEncoder(w).Encode(payload)
 }
 
-func writeAPIError(w http.ResponseWriter, status int, message string) {
-	writeAPIJSON(w, status, map[string]string{"error": message})
+func writeAPIError(w http.ResponseWriter, status int, code string, message string) {
+	writeAPIJSON(w, status, api.NDSAPIError{Code: code, Error: message})
+}
+
+func writeAPIErrorFromErr(w http.ResponseWriter, err error) {
+	if e, ok := err.(apiError); ok {
+		writeAPIJSON(w, e.status, api.NDSAPIError{Code: e.code, Error: e.message, RetryAfterSec: e.retrySec})
+		return
+	}
+	writeAPIJSON(w, http.StatusInternalServerError, api.NDSAPIError{Code: "internal_error", Error: err.Error()})
 }
