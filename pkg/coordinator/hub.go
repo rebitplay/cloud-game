@@ -189,7 +189,7 @@ func (h *Hub) handleWorkerConnection() http.HandlerFunc {
 		}
 		conn.SetMaxReadSize(h.conf.Coordinator.MaxWsSize)
 
-		worker := NewWorker(conn, *handshake, log, h.webrtcMux)
+		worker := NewWorker(conn, *handshake, log, h.webrtcMux, h)
 		defer h.workers.RemoveDisconnect(worker)
 		done := worker.HandleRequests(&h.users)
 		h.workers.Add(worker)

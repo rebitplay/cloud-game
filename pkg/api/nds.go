@@ -89,6 +89,7 @@ type (
 		LastSeen    *time.Time `json:"last_seen,omitempty"`
 		Player      int        `json:"player"`
 		Ref         string     `json:"ref"`
+		SaveStatus  string     `json:"save_status,omitempty"`
 	}
 
 	NDSCapacityResponse struct {
@@ -115,9 +116,24 @@ type (
 	}
 
 	NDSSessionPrepareRequest struct {
+		Player        int    `json:"player,omitempty"`
 		Ref           string `json:"ref,omitempty"`
 		RoomID        string `json:"room_id"`
 		SaveURL       string `json:"save_url,omitempty"`
 		SaveUploadURL string `json:"save_upload_url,omitempty"`
+	}
+
+	NDSFlushSaveRequest struct {
+		RoomID string `json:"room_id"`
+	}
+
+	NDSSaveStatus struct {
+		FlushedAt time.Time `json:"flushed_at,omitempty"`
+		Player    int       `json:"player,omitempty"`
+		Ref       string    `json:"ref,omitempty"`
+		RoomID    string    `json:"room_id"`
+		SHA1      string    `json:"sha1,omitempty"`
+		Size      int       `json:"size,omitempty"`
+		Status    string    `json:"status"`
 	}
 )

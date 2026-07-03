@@ -70,3 +70,7 @@ func (w *Worker) InstallNDSRom(req api.NDSRomInstallRequest) (*api.NDSRomInstall
 func (w *Worker) PrepareNDSSession(req api.NDSSessionPrepareRequest) (*string, error) {
 	return api.UnwrapChecked[string](w.Send(api.NDSSessionPrepare, req))
 }
+
+func (w *Worker) FlushNDSSave(roomID string) (*api.NDSSaveStatus, error) {
+	return api.UnwrapChecked[api.NDSSaveStatus](w.Send(api.NDSFlushSave, api.NDSFlushSaveRequest{RoomID: roomID}))
+}

@@ -47,3 +47,11 @@ func (w *Worker) HandlePrevSessionList(sess api.PrevSessionInfo) error {
 	w.SetSessions(m)
 	return nil
 }
+
+func (w *Worker) HandleNDSSaveUploaded(status api.NDSSaveStatus) error {
+	if w.hub == nil {
+		return nil
+	}
+	w.hub.recordNDSSaveStatus(status)
+	return nil
+}

@@ -2,6 +2,8 @@ package coordinator
 
 import (
 	"time"
+
+	"github.com/giongto35/cloud-game/v3/pkg/api"
 )
 
 const (
@@ -111,7 +113,38 @@ func (h *Hub) closeNDSRoom(roomID string, reason string) *ndsRoomSession {
 			users = append(users, seat.user)
 		}
 	}
+	seats := room.sortedSeats()
 	room.mu.Unlock()
+
+	for _, seat := range seats {
+		status := api.NDSSaveStatus{
+			Player: seat.player,
+			Ref:    seat.ref,
+			RoomID: seat.roomID,
+			Status: "unchanged",
+		}
+		if seat.worker != nil {
+			resp, err := seat.worker.FlushNDSSave(seat.roomID)
+			if err != nil || resp == nil {
+				status.Status = "failed"
+			} else {
+				status = *resp
+				if status.Player == 0 {
+					status.Player = seat.player
+				}
+				if status.Ref == "" {
+					status.Ref = seat.ref
+				}
+				if status.RoomID == "" {
+					status.RoomID = seat.roomID
+				}
+				if status.Status == "" {
+					status.Status = "unchanged"
+				}
+			}
+		}
+		h.recordNDSSaveStatus(status)
+	}
 
 	for _, user := range users {
 		user.Disconnect()
@@ -124,7 +157,7 @@ func (h *Hub) closeNDSRoom(roomID string, reason string) *ndsRoomSession {
 	room.updatedAt = now
 	room.mu.Unlock()
 
-	h.emitNDSWebhook("room.closed", room, map[string]any{"reason": reason})
+	h.emitNDSWebhook("room.closed", room, h.ndsRoomClosedExtra(room, reason))
 	h.writeNDSJournal()
 	return room
 }
@@ -143,5 +176,94 @@ func (h *Hub) closeAllNDSRooms(reason string) {
 	h.ndsRooms.mu.RUnlock()
 	for _, roomID := range roomIDs {
 		h.closeNDSRoom(roomID, reason)
+	}
+}
+
+func (h *Hub) recordNDSSaveStatus(status api.NDSSaveStatus) {
+	roomID := ndsRoomBaseFromWorkerRoom(status.RoomID)
+	if roomID == "" {
+		return
+	}
+	room := h.ndsRooms.get(roomID)
+	if room == nil {
+		return
+	}
+
+	var seat *ndsSeat
+	room.mu.Lock()
+	if status.Player > 0 {
+		seat = room.players[status.Player]
+	}
+	if seat == nil {
+		for _, candidate := range room.players {
+			if candidate.roomID == status.RoomID {
+				seat = candidate
+				break
+			}
+		}
+	}
+	if seat == nil {
+		room.mu.Unlock()
+		return
+	}
+	if status.Status == "" {
+		status.Status = "unchanged"
+	}
+	if status.Status == "unchanged" && seat.saveStatus == "uploaded" {
+		status.Status = "uploaded"
+		status.SHA1 = seat.saveSHA1
+		status.Size = seat.saveSize
+	}
+	seat.saveStatus = status.Status
+	seat.saveSHA1 = status.SHA1
+	seat.saveSize = status.Size
+	if !status.FlushedAt.IsZero() {
+		flushedAt := status.FlushedAt
+		seat.lastSaveAt = &flushedAt
+	}
+	if status.Player == 0 {
+		status.Player = seat.player
+	}
+	if status.Ref == "" {
+		status.Ref = seat.ref
+	}
+	room.updatedAt = time.Now().UTC()
+	room.mu.Unlock()
+
+	if status.Status == "uploaded" && status.SHA1 != "" {
+		h.emitNDSWebhook("save.uploaded", room, map[string]any{
+			"flushed_at": status.FlushedAt,
+			"player":     status.Player,
+			"ref":        status.Ref,
+			"sha1":       status.SHA1,
+			"size":       status.Size,
+		})
+	}
+}
+
+func (h *Hub) ndsRoomClosedExtra(room *ndsRoomSession, reason string) map[string]any {
+	room.mu.Lock()
+	defer room.mu.Unlock()
+
+	players := make([]map[string]any, 0, len(room.players))
+	for _, seat := range room.sortedSeats() {
+		status := seat.saveStatus
+		if status == "" {
+			status = "unchanged"
+		}
+		players = append(players, map[string]any{
+			"player":      seat.player,
+			"ref":         seat.ref,
+			"save_status": status,
+		})
+	}
+	durationSec := int64(0)
+	if room.startedAt != nil && room.closedAt != nil {
+		durationSec = int64(room.closedAt.Sub(*room.startedAt).Seconds())
+	}
+	return map[string]any{
+		"duration_sec": durationSec,
+		"players":      players,
+		"reason":       reason,
 	}
 }

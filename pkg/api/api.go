@@ -88,6 +88,8 @@ const (
 	PrevSessions      PT = 206
 	NDSRomInstall     PT = 207
 	NDSSessionPrepare PT = 208
+	NDSFlushSave      PT = 209
+	NDSSaveUploaded   PT = 210
 )
 
 func (p PT) String() string {
@@ -134,6 +136,10 @@ func (p PT) String() string {
 		return "NDSRomInstall"
 	case NDSSessionPrepare:
 		return "NDSSessionPrepare"
+	case NDSFlushSave:
+		return "NDSFlushSave"
+	case NDSSaveUploaded:
+		return "NDSSaveUploaded"
 	default:
 		return "Unknown"
 	}

@@ -208,6 +208,7 @@ func (h *Hub) createNDSRoomV1(req api.NDSRoomCreateRequest) (api.NDSRoomV1Respon
 		}
 		saveURL := slots[slot.player].SaveURL
 		resp, err := slot.worker.PrepareNDSSession(api.NDSSessionPrepareRequest{
+			Player:        slot.player,
 			Ref:           slots[slot.player].Ref,
 			RoomID:        slot.roomID,
 			SaveURL:       saveURL,
@@ -229,6 +230,7 @@ func (h *Hub) createNDSRoomV1(req api.NDSRoomCreateRequest) (api.NDSRoomV1Respon
 			ref:           slotReq.Ref,
 			roomID:        slot.roomID,
 			saveURL:       slotReq.SaveURL,
+			saveStatus:    "unchanged",
 			saveUploadURL: slotReq.SaveUploadURL,
 			worker:        slot.worker,
 		}

@@ -8,6 +8,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/giongto35/cloud-game/v3/pkg/api"
 	"github.com/giongto35/cloud-game/v3/pkg/worker/caged/libretro"
 )
 
@@ -20,9 +21,11 @@ type ndsSaveUpload struct {
 	roomID string
 	sess   preparedNDSSession
 
-	mu      sync.Mutex
-	lastSHA string
-	status  string
+	mu        sync.Mutex
+	flushedAt time.Time
+	lastSHA   string
+	lastSize  int
+	status    string
 }
 
 func (w *Worker) startNDSSaveUpload(roomID string, app *libretro.Caged, session preparedNDSSession) {
@@ -53,23 +56,28 @@ func (w *Worker) startNDSSaveUpload(roomID string, app *libretro.Caged, session 
 }
 
 func (w *Worker) flushNDSSaveUpload(roomID string) {
+	_ = w.flushNDSSaveUploadStatus(roomID)
+}
+
+func (w *Worker) flushNDSSaveUploadStatus(roomID string) api.NDSSaveStatus {
 	w.saveUploads.mu.Lock()
 	upload := w.saveUploads.uploads[roomID]
 	w.saveUploads.mu.Unlock()
 	if upload == nil {
-		return
+		return api.NDSSaveStatus{RoomID: roomID, Status: "unchanged"}
 	}
 	r := w.router.FindRoom(roomID)
 	if r == nil {
-		return
+		return upload.snapshot()
 	}
 	app := roomWithLibretro(r.App())
 	if app == nil {
-		return
+		return upload.snapshot()
 	}
 	if err := w.flushNDSSaveUploadWithApp(upload, app); err != nil {
 		w.log.Warn().Err(err).Str("room", roomID).Msg("NDS final save upload failed")
 	}
+	return upload.snapshot()
 }
 
 func (w *Worker) stopNDSSaveUpload(roomID string) {
@@ -102,8 +110,10 @@ func (w *Worker) uploadNDSSaveRaw(upload *ndsSaveUpload, raw []byte) error {
 
 	upload.mu.Lock()
 	if upload.lastSHA == sha {
+		if upload.status == "" {
+			upload.status = "unchanged"
+		}
 		upload.mu.Unlock()
-		upload.setStatus("unchanged")
 		return nil
 	}
 	upload.mu.Unlock()
@@ -114,8 +124,12 @@ func (w *Worker) uploadNDSSaveRaw(upload *ndsSaveUpload, raw []byte) error {
 	}
 	upload.mu.Lock()
 	upload.lastSHA = sha
+	upload.lastSize = len(raw)
+	upload.flushedAt = time.Now().UTC()
 	upload.status = "uploaded"
+	status := upload.snapshotLocked()
 	upload.mu.Unlock()
+	w.emitNDSSaveUploaded(status)
 	return nil
 }
 
@@ -123,6 +137,35 @@ func (u *ndsSaveUpload) setStatus(status string) {
 	u.mu.Lock()
 	u.status = status
 	u.mu.Unlock()
+}
+
+func (u *ndsSaveUpload) snapshot() api.NDSSaveStatus {
+	u.mu.Lock()
+	defer u.mu.Unlock()
+	return u.snapshotLocked()
+}
+
+func (u *ndsSaveUpload) snapshotLocked() api.NDSSaveStatus {
+	status := u.status
+	if status == "" {
+		status = "unchanged"
+	}
+	return api.NDSSaveStatus{
+		FlushedAt: u.flushedAt,
+		Player:    u.sess.Player,
+		Ref:       u.sess.Ref,
+		RoomID:    u.roomID,
+		SHA1:      u.lastSHA,
+		Size:      u.lastSize,
+		Status:    status,
+	}
+}
+
+func (w *Worker) emitNDSSaveUploaded(status api.NDSSaveStatus) {
+	if w == nil || w.cord == nil || status.Status != "uploaded" {
+		return
+	}
+	w.cord.NDSSaveUploaded(status)
 }
 
 func putNDSSave(rawURL string, data []byte) error {

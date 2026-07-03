@@ -58,6 +58,9 @@ type ndsSeat struct {
 	ref           string
 	roomID        string
 	saveURL       string
+	saveSHA1      string
+	saveSize      int
+	saveStatus    string
 	saveUploadURL string
 	user          *User
 	worker        *Worker
@@ -171,6 +174,7 @@ func (s *ndsRoomSession) stateResponse() api.NDSRoomStateResponse {
 			LastSeen:    seat.lastSeen,
 			Player:      seat.player,
 			Ref:         seat.ref,
+			SaveStatus:  seat.saveStatus,
 		})
 	}
 	return api.NDSRoomStateResponse{

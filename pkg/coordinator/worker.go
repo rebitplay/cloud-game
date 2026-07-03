@@ -33,6 +33,7 @@ type Worker struct {
 	Lib      []api.GameInfo
 	Sessions map[string]struct{}
 
+	hub    *Hub
 	log    *logger.Logger
 	rtcMux *webRTCMux
 }
@@ -66,7 +67,7 @@ type AppMeta struct {
 	Type   string
 }
 
-func NewWorker(sock *com.Connection, handshake api.ConnectionRequest[com.Uid], log *logger.Logger, rtcMux *webRTCMux) *Worker {
+func NewWorker(sock *com.Connection, handshake api.ConnectionRequest[com.Uid], log *logger.Logger, rtcMux *webRTCMux, hub *Hub) *Worker {
 	conn := com.NewConnection[api.PT, api.In[com.Uid], api.Out, *api.Out](sock, handshake.Id, log)
 	ndsPlayer := handshake.NDSPlayer
 	if ndsPlayer == 0 {
@@ -86,6 +87,7 @@ func NewWorker(sock *com.Connection, handshake api.ConnectionRequest[com.Uid], l
 		Tag:        handshake.Tag,
 		WebRTCPort: handshake.WebRTCPort,
 		Zone:       handshake.Zone,
+		hub:        hub,
 		log: log.Extend(log.With().
 			Str(logger.ClientField, logger.MarkNone).
 			Str(logger.DirectionField, logger.MarkNone).
@@ -115,6 +117,8 @@ func (w *Worker) HandleRequests(users HasUserRegistry) chan struct{} {
 			err = api.DoE(p, w.HandleLibGameList)
 		case api.PrevSessions:
 			err = api.DoE(p, w.HandlePrevSessionList)
+		case api.NDSSaveUploaded:
+			err = api.DoE(p, w.HandleNDSSaveUploaded)
 		default:
 			w.log.Warn().Msgf("Unknown packet: %+v", p)
 		}

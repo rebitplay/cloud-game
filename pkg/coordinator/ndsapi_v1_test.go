@@ -18,8 +18,9 @@ import (
 )
 
 type fakeNDSConnection struct {
-	id        com.Uid
-	lastStart *api.StartGameRequest
+	flushStatus *api.NDSSaveStatus
+	id          com.Uid
+	lastStart   *api.StartGameRequest
 }
 
 func (f *fakeNDSConnection) Disconnect()        {}
@@ -37,6 +38,12 @@ func (f *fakeNDSConnection) Send(t api.PT, payload any) ([]byte, error) {
 		return json.Marshal(api.NDSRomInstallResponse{Game: "Tetris DS", Path: "nds/" + req.FileName})
 	case api.NDSSessionPrepare:
 		return json.Marshal(api.OK)
+	case api.NDSFlushSave:
+		if f.flushStatus != nil {
+			return json.Marshal(f.flushStatus)
+		}
+		req := payload.(api.NDSFlushSaveRequest)
+		return json.Marshal(api.NDSSaveStatus{RoomID: req.RoomID, Status: "unchanged"})
 	case api.StartGame:
 		req := payload.(api.StartGameRequest)
 		f.lastStart = &req

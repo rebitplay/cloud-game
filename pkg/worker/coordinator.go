@@ -96,6 +96,8 @@ func (c *coordinator) HandleRequests(w *Worker) chan struct{} {
 			err = api.Do(x, func(d api.NDSRomInstallRequest) { out = c.HandleNDSRomInstall(d, w) })
 		case api.NDSSessionPrepare:
 			err = api.Do(x, func(d api.NDSSessionPrepareRequest) { out = c.HandleNDSSessionPrepare(d, w) })
+		case api.NDSFlushSave:
+			err = api.Do(x, func(d api.NDSFlushSaveRequest) { out = c.HandleNDSFlushSave(d, w) })
 		default:
 			c.log.Warn().Msgf("unhandled packet type %v", x.T)
 		}
@@ -116,6 +118,10 @@ func (c *coordinator) IceCandidate(candidate string, sessionId string) {
 		Stateful: api.Stateful{Id: sessionId},
 		Ice:      &candidate,
 	})
+}
+
+func (c *coordinator) NDSSaveUploaded(status api.NDSSaveStatus) {
+	c.Notify(api.NDSSaveUploaded, status)
 }
 
 func (c *coordinator) SendLibrary(w *Worker) {

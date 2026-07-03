@@ -10,6 +10,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/giongto35/cloud-game/v3/pkg/api"
+	"github.com/giongto35/cloud-game/v3/pkg/com"
 	"github.com/giongto35/cloud-game/v3/pkg/config"
 	"github.com/giongto35/cloud-game/v3/pkg/logger"
 )
@@ -84,5 +86,77 @@ func TestNDSJournalWritesLiveRooms(t *testing.T) {
 	h.closeNDSRoom("room-123", ndsCloseHost)
 	if _, err := os.Stat(path); !os.IsNotExist(err) {
 		t.Fatalf("journal still exists after close: %v", err)
+	}
+}
+
+func TestNDSRoomCloseFlushesSavesAndReportsStatuses(t *testing.T) {
+	events := make(chan ndsWebhookPayload, 4)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var payload ndsWebhookPayload
+		if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+			t.Errorf("decode webhook: %v", err)
+		}
+		events <- payload
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	defer server.Close()
+	t.Setenv("NDS_WEBHOOK_URL", server.URL)
+
+	h := NewHub(config.CoordinatorConfig{}, logger.NewConsole(false, "test", false))
+	startedAt := time.Now().UTC().Add(-5 * time.Second)
+	flushedAt := time.Now().UTC()
+	internalRoomID := "room-123-p1___Tetris DS"
+	worker := &Worker{Connection: &fakeNDSConnection{
+		id: com.NewUid(),
+		flushStatus: &api.NDSSaveStatus{
+			FlushedAt: flushedAt,
+			Player:    1,
+			Ref:       "user_1",
+			RoomID:    internalRoomID,
+			SHA1:      "0123456789abcdef0123456789abcdef01234567",
+			Size:      12,
+			Status:    "uploaded",
+		},
+	}}
+	room := &ndsRoomSession{
+		createdAt: time.Now().UTC().Add(-10 * time.Second),
+		players: map[int]*ndsSeat{
+			1: {player: 1, ref: "user_1", roomID: internalRoomID, saveStatus: "unchanged", worker: worker},
+		},
+		roomID:    "room-123",
+		startedAt: &startedAt,
+		state:     ndsRoomActive,
+		updatedAt: time.Now().UTC(),
+	}
+	h.ndsRooms.put(room)
+
+	h.closeNDSRoom("room-123", ndsCloseHost)
+
+	var closed ndsWebhookPayload
+	deadline := time.After(time.Second)
+	for closed.Event != "room.closed" {
+		select {
+		case event := <-events:
+			if event.Event == "room.closed" {
+				closed = event
+			}
+		case <-deadline:
+			t.Fatal("timed out waiting for room.closed webhook")
+		}
+	}
+	extra := closed.Extra
+	if extra["reason"] != ndsCloseHost {
+		t.Fatalf("reason = %#v, want %q", extra["reason"], ndsCloseHost)
+	}
+	players, ok := extra["players"].([]any)
+	if !ok || len(players) != 1 {
+		t.Fatalf("players extra = %#v", extra["players"])
+	}
+	player, ok := players[0].(map[string]any)
+	if !ok || player["save_status"] != "uploaded" {
+		t.Fatalf("player save status = %#v", players[0])
+	}
+	if got := h.ndsRooms.get("room-123").players[1].saveStatus; got != "uploaded" {
+		t.Fatalf("stored save status = %q, want uploaded", got)
 	}
 }

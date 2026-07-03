@@ -29,6 +29,7 @@ const (
 )
 
 type preparedNDSSession struct {
+	Player        int
 	Ref           string
 	SaveURL       string
 	SaveUploadURL string
@@ -119,11 +120,19 @@ func (c *coordinator) HandleNDSSessionPrepare(rq api.NDSSessionPrepareRequest, w
 		}
 	}
 	w.markPreparedSession(rq.RoomID, preparedNDSSession{
+		Player:        rq.Player,
 		Ref:           rq.Ref,
 		SaveURL:       rq.SaveURL,
 		SaveUploadURL: rq.SaveUploadURL,
 	})
 	return api.OkPacket
+}
+
+func (c *coordinator) HandleNDSFlushSave(rq api.NDSFlushSaveRequest, w *Worker) api.Out {
+	if rq.RoomID == "" {
+		return api.ErrPacket
+	}
+	return api.Out{Payload: w.flushNDSSaveUploadStatus(rq.RoomID)}
 }
 
 func (w *Worker) installNDSSave(roomID string, rawURL string) error {
