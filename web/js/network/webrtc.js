@@ -17,8 +17,9 @@ const ice = ((signaller) => {
 
     const onCandidate = (/** @type {RTCPeerConnectionIceEvent} */ ev) => {
         if (!ev.candidate) return;
-        log.debug(`[rtc] [ice] local`, ev.candidate);
-        signaller()?.sendIceCandidate(ev.candidate);
+        const candidate = ev.candidate?.toJSON?.() ?? ev.candidate;
+        log.debug(`[rtc] [ice] local`, candidate);
+        signaller()?.sendIceCandidate(candidate);
     };
 
     const onCandidateError = (
@@ -53,7 +54,7 @@ const ice = ((signaller) => {
     // add adds or buffers ICE candidates
     // if wait is true
     const add = (pc, candidate, wait = false) => {
-        if (wait) {
+        if (wait || !pc.remoteDescription) {
             buf.push(candidate);
             return;
         }
@@ -62,6 +63,10 @@ const ice = ((signaller) => {
             ? new RTCIceCandidate(candidate)
             : END_OF_CANDIDATES;
         pc.addIceCandidate(c).catch((e) => {
+            if (e.name === "InvalidStateError" && !pc.remoteDescription) {
+                buf.push(candidate);
+                return;
+            }
             log.error("[rtc] [ice] add", e.name);
         });
     };
@@ -240,9 +245,7 @@ export const webrtc = {
         pc.onsignalingstatechange = () => {
             log.debug(`[rtc] [sig] state: ${pc.signalingState}`);
 
-            if (pc.signalingState === "stable") {
-                ice.flush(pc);
-            }
+            ice.flush(pc);
         };
 
         connectionTime = performance.now();
@@ -296,9 +299,7 @@ export const webrtc = {
     candidate: (/** @type {RTCIceCandidateInit | string} */ candidate) => {
         log.debug(`[rtc] [ice] remote`, candidate);
         if (pc) {
-            const buffered =
-                !pc.remoteDescription || pc.signalingState !== "stable";
-            ice.add(pc, candidate, buffered);
+            ice.add(pc, candidate, !pc.remoteDescription);
         }
     },
     send: (chan, data) => {
