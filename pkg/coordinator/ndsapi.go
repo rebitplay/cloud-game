@@ -203,6 +203,11 @@ func (h *Hub) createNDSRoomV1(req api.NDSRoomCreateRequest) (api.NDSRoomV1Respon
 			releaseNDSReservations(reserved)
 		}
 	}()
+	slots := playerSlotsByNumber(req.PlayerSlots)
+	failureSeats := makeNDSFailureSeats(reserved, slots)
+	failProvisioning := func(reason string) {
+		h.recordNDSProvisioningFailure(roomID, endpoint, gameName, groupID, failureSeats, reason, now)
+	}
 
 	installReq := api.NDSRomInstallRequest{URL: req.Rom.URL, FileName: fileName, SHA1: strings.ToLower(req.Rom.SHA1)}
 	romPath := "nds/" + fileName
@@ -212,6 +217,7 @@ func (h *Hub) createNDSRoomV1(req api.NDSRoomCreateRequest) (api.NDSRoomV1Respon
 		}
 		resp, err := slot.worker.InstallNDSRom(installReq)
 		if err != nil || resp == nil || resp.Game == "" {
+			failProvisioning("rom_install_failed")
 			return api.NDSRoomV1Response{}, 0, apiInternal(fmt.Sprintf("worker %s could not install ROM", slot.worker.Id().String()))
 		}
 		gameName = resp.Game
@@ -220,7 +226,6 @@ func (h *Hub) createNDSRoomV1(req api.NDSRoomCreateRequest) (api.NDSRoomV1Respon
 		}
 	}
 
-	slots := playerSlotsByNumber(req.PlayerSlots)
 	for _, slot := range reserved {
 		if !slot.stream {
 			continue
@@ -234,6 +239,7 @@ func (h *Hub) createNDSRoomV1(req api.NDSRoomCreateRequest) (api.NDSRoomV1Respon
 			SaveUploadURL: slots[slot.player].SaveUploadURL,
 		})
 		if err != nil || resp == nil || *resp != api.OK {
+			failProvisioning("save_prepare_failed")
 			return api.NDSRoomV1Response{}, 0, apiInternal(fmt.Sprintf("worker %s could not prepare save for player %d", slot.worker.Id().String(), slot.player))
 		}
 	}
@@ -280,6 +286,43 @@ func (h *Hub) createNDSRoomV1(req api.NDSRoomCreateRequest) (api.NDSRoomV1Respon
 		return api.NDSRoomV1Response{}, 0, apiInternal(err.Error())
 	}
 	return resp, http.StatusCreated, nil
+}
+
+func makeNDSFailureSeats(reserved []reservedNDSWorker, slots map[int]api.NDSPlayerSlotCreate) map[int]*ndsSeat {
+	players := make(map[int]*ndsSeat)
+	for _, slot := range reserved {
+		if !slot.stream {
+			continue
+		}
+		req := slots[slot.player]
+		players[slot.player] = &ndsSeat{
+			player:        slot.player,
+			ref:           req.Ref,
+			roomID:        slot.roomID,
+			saveURL:       req.SaveURL,
+			saveStatus:    "unchanged",
+			saveUploadURL: req.SaveUploadURL,
+			worker:        slot.worker,
+		}
+	}
+	return players
+}
+
+func (h *Hub) recordNDSProvisioningFailure(roomID string, endpoint string, game string, groupID string, players map[int]*ndsSeat, reason string, now time.Time) {
+	room := &ndsRoomSession{
+		createdAt: now,
+		endpoint:  endpoint,
+		game:      game,
+		groupID:   groupID,
+		players:   players,
+		reason:    reason,
+		roomID:    roomID,
+		state:     ndsRoomFailed,
+		updatedAt: now,
+	}
+	h.ndsRooms.put(room)
+	h.emitNDSWebhook("room.failed", room, map[string]any{"reason": reason})
+	h.writeNDSJournal()
 }
 
 func (h *Hub) handleNDSRoomGet(w http.ResponseWriter, roomID string) {

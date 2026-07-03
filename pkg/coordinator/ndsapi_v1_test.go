@@ -3,6 +3,7 @@ package coordinator
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -18,10 +19,11 @@ import (
 )
 
 type fakeNDSConnection struct {
-	flushBlock  <-chan struct{}
-	flushStatus *api.NDSSaveStatus
-	id          com.Uid
-	lastStart   *api.StartGameRequest
+	flushBlock    <-chan struct{}
+	flushStatus   *api.NDSSaveStatus
+	id            com.Uid
+	lastStart     *api.StartGameRequest
+	romInstallErr error
 }
 
 func (f *fakeNDSConnection) Disconnect()        {}
@@ -35,6 +37,9 @@ func (f *fakeNDSConnection) ProcessPackets(func(api.In[com.Uid]) error) chan str
 func (f *fakeNDSConnection) Send(t api.PT, payload any) ([]byte, error) {
 	switch t {
 	case api.NDSRomInstall:
+		if f.romInstallErr != nil {
+			return nil, f.romInstallErr
+		}
 		req := payload.(api.NDSRomInstallRequest)
 		return json.Marshal(api.NDSRomInstallResponse{Game: "Tetris DS", Path: "nds/" + req.FileName})
 	case api.NDSSessionPrepare:
@@ -172,6 +177,50 @@ func TestNDSV1CreateRejectsDisallowedRemoteHost(t *testing.T) {
 	}
 	if errResp.Code != "invalid_rom_url" {
 		t.Fatalf("bad host code = %q, want invalid_rom_url", errResp.Code)
+	}
+}
+
+func TestNDSV1CreateProvisioningFailureEmitsWebhook(t *testing.T) {
+	t.Setenv("NDS_API_KEY", "test-key")
+	t.Setenv("NDS_TOKEN_SECRET", "token-secret")
+	t.Setenv("NDS_PUBLIC_ENDPOINT", "https://sg-1.nds.rebitplay.com")
+	events := make(chan ndsWebhookPayload, 1)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var payload ndsWebhookPayload
+		if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+			t.Errorf("decode webhook: %v", err)
+		}
+		events <- payload
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	defer server.Close()
+	t.Setenv("NDS_WEBHOOK_URL", server.URL)
+
+	h := testNDSHub(t, 1)
+	for worker := range h.workers.Values() {
+		if worker.NDSGroup == "mkds-r1" && worker.NDSPlayer == 1 {
+			worker.Connection = &fakeNDSConnection{id: worker.Id(), romInstallErr: errors.New("install failed")}
+			break
+		}
+	}
+
+	resp := postNDSRoom(t, h, testNDSCreateBody("room-123", 2))
+	if resp.Code != http.StatusInternalServerError {
+		t.Fatalf("create status = %d, want %d; body=%s", resp.Code, http.StatusInternalServerError, resp.Body.String())
+	}
+	select {
+	case event := <-events:
+		if event.Event != "room.failed" || event.RoomID != "room-123" {
+			t.Fatalf("unexpected webhook: %#v", event)
+		}
+		if event.Extra["reason"] != "rom_install_failed" {
+			t.Fatalf("failure reason = %#v", event.Extra["reason"])
+		}
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for room.failed webhook")
+	}
+	if got := h.ndsRooms.get("room-123").state; got != ndsRoomFailed {
+		t.Fatalf("room state = %s, want %s", got, ndsRoomFailed)
 	}
 }
 
