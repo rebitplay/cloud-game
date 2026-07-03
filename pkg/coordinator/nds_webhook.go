@@ -12,6 +12,7 @@ import (
 	"path/filepath"
 	"time"
 
+	"github.com/giongto35/cloud-game/v3/pkg/monitoring"
 	"github.com/rs/xid"
 )
 
@@ -49,6 +50,7 @@ func (h *Hub) postNDSWebhook(rawURL string, event string, body []byte) {
 		if err := postNDSWebhookOnce(rawURL, event, body); err != nil {
 			h.log.Warn().Err(err).Str("event", event).Int("attempt", attempt+1).Msg("NDS webhook delivery failed")
 			if attempt < 4 {
+				monitoring.IncNDSWebhookRetry(event)
 				time.Sleep(backoff)
 				backoff *= 2
 				if backoff > 2*time.Minute {

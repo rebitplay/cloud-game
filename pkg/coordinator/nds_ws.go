@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/giongto35/cloud-game/v3/pkg/api"
+	"github.com/giongto35/cloud-game/v3/pkg/monitoring"
 )
 
 func (h *Hub) resolveNDSUserSession(q url.Values) (*ndsUserSession, error) {
@@ -13,6 +14,7 @@ func (h *Hub) resolveNDSUserSession(q url.Values) (*ndsUserSession, error) {
 	if token == "" {
 		roomID := q.Get(api.RoomIdQueryParam)
 		if h.ndsRooms.live(ndsRoomBaseFromWorkerRoom(roomID)) != nil {
+			monitoring.IncNDSTokenFailure("missing")
 			return nil, fmt.Errorf("token required for NDS room")
 		}
 		return nil, nil
@@ -20,16 +22,19 @@ func (h *Hub) resolveNDSUserSession(q url.Values) (*ndsUserSession, error) {
 
 	claims, err := validateNDSSeatToken(token, time.Now().UTC())
 	if err != nil {
+		monitoring.IncNDSTokenFailure("invalid")
 		return nil, err
 	}
 	room := h.ndsRooms.live(claims.RID)
 	if room == nil {
+		monitoring.IncNDSTokenFailure("room_not_found")
 		return nil, fmt.Errorf("room not found")
 	}
 	room.mu.Lock()
 	defer room.mu.Unlock()
 	seat := room.players[claims.P]
 	if seat == nil || seat.ref != claims.Ref {
+		monitoring.IncNDSTokenFailure("seat_not_found")
 		return nil, fmt.Errorf("seat not found")
 	}
 	return &ndsUserSession{RoomID: claims.RID, Player: claims.P, Ref: claims.Ref, Seat: seat}, nil

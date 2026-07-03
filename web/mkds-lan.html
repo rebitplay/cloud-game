@@ -52,7 +52,7 @@
         .bar {
             display: grid;
             gap: 10px;
-            grid-template-columns: auto minmax(180px, 1fr) minmax(280px, 2fr) minmax(110px, 140px) auto;
+            grid-template-columns: auto minmax(160px, 1fr) minmax(260px, 2fr) minmax(260px, 1.5fr) minmax(110px, 140px) auto;
             padding: 10px;
         }
 
@@ -202,6 +202,10 @@
             <input id="romUrl" spellcheck="false">
         </label>
         <label>
+            ROM SHA-1
+            <input id="romSha1" spellcheck="false">
+        </label>
+        <label>
             Players
             <select id="players">
                 <option value="2">2</option>
@@ -223,6 +227,7 @@
     const form = document.getElementById("form");
     const roomInput = document.getElementById("room");
     const romInput = document.getElementById("romUrl");
+    const romSha1Input = document.getElementById("romSha1");
     const playerSelect = document.getElementById("players");
     const saveInputs = document.getElementById("saveInputs");
     const createButton = document.getElementById("create");
@@ -232,6 +237,10 @@
 
     roomInput.value = params.get("room") || roomInput.value;
     romInput.value = params.get("rom") || "builtin:Tetris-DS-(USA).nds";
+    const builtinRomHashes = {
+        "builtin:Tetris-DS-(USA).nds": "13eb2e7e5357a6e31f94ea238826c111c965bc9b",
+    };
+    romSha1Input.value = params.get("sha1") || params.get("rom_sha1") || builtinRomHashes[romInput.value] || "";
     playerSelect.value = String(Math.max(2, Math.min(4, Number.parseInt(params.get("players") || "3", 10) || 3)));
 
     function playerCount() {
@@ -268,6 +277,7 @@
             base_url: location.origin,
             players: playerCount(),
             room: roomInput.value.trim(),
+            rom_sha1: romSha1Input.value.trim(),
             rom_url: romInput.value.trim(),
             saves,
         };
@@ -330,6 +340,7 @@
         const url = new URL(location.href);
         url.searchParams.set("room", roomInput.value.trim());
         url.searchParams.set("rom", romInput.value.trim());
+        url.searchParams.set("sha1", romSha1Input.value.trim());
         url.searchParams.set("players", String(playerCount()));
         for (let player = 1; player <= 4; player++) {
             const input = document.getElementById(`save${player}`);
@@ -347,6 +358,12 @@
         createRoom();
     });
     playerSelect.addEventListener("change", renderSaveInputs);
+    romInput.addEventListener("change", () => {
+        const hash = builtinRomHashes[romInput.value.trim()];
+        if (hash && !romSha1Input.value.trim()) {
+            romSha1Input.value = hash;
+        }
+    });
     renderSaveInputs();
 </script>
 </body>

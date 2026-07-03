@@ -180,6 +180,71 @@ func TestNDSV1CreateRejectsDisallowedRemoteHost(t *testing.T) {
 	}
 }
 
+func TestNDSV1AllowsBuiltinROMAndOptionalSaveUploadURL(t *testing.T) {
+	req := api.NDSRoomCreateRequest{
+		Room:    "room-123",
+		Players: 2,
+		Rom: api.NDSRomCreate{
+			Name: "Tetris-DS-(USA).nds",
+			SHA1: "13eb2e7e5357a6e31f94ea238826c111c965bc9b",
+			URL:  "builtin:Tetris-DS-(USA).nds",
+		},
+		PlayerSlots: []api.NDSPlayerSlotCreate{
+			{Player: 1, Ref: "user_1"},
+			{Player: 2, Ref: "user_2"},
+		},
+	}
+	if err := validateNDSRoomCreate(req); err != nil {
+		t.Fatalf("builtin ROM with optional save upload rejected: %v", err)
+	}
+
+	req.PlayerSlots[0].SaveURL = "builtin:save.srm"
+	err := validateNDSRoomCreate(req)
+	var apiErr apiError
+	if !errors.As(err, &apiErr) || apiErr.code != "invalid_save_url" {
+		t.Fatalf("save URL should still require http(s), got %v", err)
+	}
+}
+
+func TestNDSDemoCreateBuildsTokenizedStreamURLs(t *testing.T) {
+	t.Setenv("NDS_TOKEN_SECRET", "token-secret")
+	t.Setenv("NDS_PUBLIC_ENDPOINT", "http://127.0.0.1:8000")
+
+	h := testNDSHub(t, 1)
+	req := httptest.NewRequest(http.MethodPost, "/api/nds/rooms", nil)
+	resp, status, err := h.createNDSDemoRoom(req, ndsDemoRoomCreateRequest{
+		BaseURL: "http://play.example",
+		Players: 3,
+		RomURL:  "builtin:Tetris-DS-(USA).nds",
+		Room:    "Tetris Demo!",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if status != http.StatusCreated {
+		t.Fatalf("status = %d, want %d", status, http.StatusCreated)
+	}
+	if resp.Room != "tetris-demo" {
+		t.Fatalf("room = %q, want tetris-demo", resp.Room)
+	}
+	if len(resp.Players) != 3 {
+		t.Fatalf("players = %d, want 3", len(resp.Players))
+	}
+	for _, player := range resp.Players {
+		u, err := url.Parse(player.URL)
+		if err != nil {
+			t.Fatalf("stream URL parse: %v", err)
+		}
+		q := u.Query()
+		if u.Scheme != "http" || u.Host != "play.example" || q.Get("token") == "" {
+			t.Fatalf("stream URL missing base/token: %s", player.URL)
+		}
+		if q.Get("id") == "" || q.Get("view") != "stream" || q.Get("client") != "v9" {
+			t.Fatalf("stream URL missing app params: %s", player.URL)
+		}
+	}
+}
+
 func TestNDSV1CreateProvisioningFailureEmitsWebhook(t *testing.T) {
 	t.Setenv("NDS_API_KEY", "test-key")
 	t.Setenv("NDS_TOKEN_SECRET", "token-secret")

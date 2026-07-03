@@ -4,6 +4,7 @@ import (
 	"time"
 
 	"github.com/giongto35/cloud-game/v3/pkg/api"
+	"github.com/giongto35/cloud-game/v3/pkg/monitoring"
 )
 
 const (
@@ -147,6 +148,7 @@ func (h *Hub) finishNDSRoomClose(room *ndsRoomSession, reason string) *ndsRoomSe
 		if seat.worker != nil {
 			resp, err := seat.worker.FlushNDSSave(seat.roomID)
 			if err != nil || resp == nil {
+				monitoring.IncNDSSaveUploadFailure("final_flush")
 				status.Status = "failed"
 			} else {
 				status = *resp
@@ -179,6 +181,7 @@ func (h *Hub) finishNDSRoomClose(room *ndsRoomSession, reason string) *ndsRoomSe
 	room.updatedAt = now
 	room.mu.Unlock()
 
+	h.auditNDSRoomClose(room, reason)
 	h.emitNDSWebhook("room.closed", room, h.ndsRoomClosedExtra(room, reason))
 	h.writeNDSJournal()
 	return room

@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/giongto35/cloud-game/v3/pkg/api"
+	"github.com/giongto35/cloud-game/v3/pkg/monitoring"
 	"github.com/giongto35/cloud-game/v3/pkg/worker/caged/libretro"
 )
 
@@ -46,6 +47,7 @@ func (w *Worker) startNDSSaveUpload(roomID string, app *libretro.Caged, session 
 			select {
 			case <-ticker.C:
 				if err := w.flushNDSSaveUploadWithApp(upload, app); err != nil {
+					monitoring.IncNDSSaveUploadFailure("periodic_flush")
 					w.log.Warn().Err(err).Str("room", roomID).Msg("NDS periodic save upload failed")
 				}
 			case <-ctx.Done():
@@ -75,6 +77,7 @@ func (w *Worker) flushNDSSaveUploadStatus(roomID string) api.NDSSaveStatus {
 		return upload.snapshot()
 	}
 	if err := w.flushNDSSaveUploadWithApp(upload, app); err != nil {
+		monitoring.IncNDSSaveUploadFailure("final_flush")
 		w.log.Warn().Err(err).Str("room", roomID).Msg("NDS final save upload failed")
 	}
 	return upload.snapshot()
@@ -96,6 +99,7 @@ func (w *Worker) flushNDSSaveUploadWithApp(upload *ndsSaveUpload, app *libretro.
 	}
 	raw, err := app.SaveSRAMRaw()
 	if err != nil {
+		monitoring.IncNDSSaveUploadFailure("read_sram")
 		upload.setStatus("failed")
 		return err
 	}
@@ -119,6 +123,7 @@ func (w *Worker) uploadNDSSaveRaw(upload *ndsSaveUpload, raw []byte) error {
 	upload.mu.Unlock()
 
 	if err := putNDSSave(upload.sess.SaveUploadURL, raw); err != nil {
+		monitoring.IncNDSSaveUploadFailure("put")
 		upload.setStatus("failed")
 		return err
 	}

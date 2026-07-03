@@ -47,6 +47,7 @@ func NewHub(conf config.CoordinatorConfig, log *logger.Logger) *Hub {
 		ndsWS:      newFixedWindowLimiter(),
 		log:        log,
 	}
+	registerNDSMetrics(hub)
 	hub.emitNDSOrphanJournal()
 	return hub
 }

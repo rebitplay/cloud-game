@@ -24,6 +24,8 @@ import (
 	"sync/atomic"
 	"time"
 	"unsafe"
+
+	"github.com/giongto35/cloud-game/v3/pkg/monitoring"
 )
 
 const (
@@ -407,6 +409,8 @@ func (n *Nanoarch) logNetpacketStats(force bool) {
 	if !force && txPackets+txControl+rxPackets+delivered+droppedQueue+ignoredRoom+ignoredDst+ignoredSelf+ignoredControl == 0 {
 		return
 	}
+
+	monitoring.AddNDSNetpacketStats(n.netpacket.roomName, n.netpacket.clientID, txPackets, rxPackets, droppedQueue)
 
 	n.log.Info().
 		Uint16("client_id", n.netpacket.clientID).

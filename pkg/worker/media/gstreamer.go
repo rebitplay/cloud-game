@@ -12,6 +12,7 @@ import (
 
 	"github.com/giongto35/cloud-game/v3/pkg/config"
 	"github.com/giongto35/cloud-game/v3/pkg/logger"
+	"github.com/giongto35/cloud-game/v3/pkg/monitoring"
 	"github.com/go-gst/go-gst/gst"
 	"github.com/go-gst/go-gst/gst/app"
 	"github.com/klauspost/cpuid/v2"
@@ -330,6 +331,7 @@ func (g *GstMediaPipe) videoWorker(v *pipe, vidFmt uint32, ch <-chan videoJob, d
 		if v.stale.Load() {
 			continue
 		}
+		started := time.Now()
 		C.pushVideoBuf(v.src(),
 			unsafe.Pointer(&job.data[0]), C.gsize(len(job.data)),
 			C.GstVideoFormat(vidFmt), C.guint(job.w), C.guint(job.h), C.gint(job.stride))
@@ -342,6 +344,8 @@ func (g *GstMediaPipe) videoWorker(v *pipe, vidFmt uint32, ch <-chan videoJob, d
 		data := unsafe.Slice((*byte)(unsafe.Pointer(mi.data)), int(mi.size))
 		job.cb(data, job.dur)
 		C.unmapAndUnref(buf, &mi)
+		monitoring.IncWorkerVideoFrame()
+		monitoring.ObserveWorkerVideoEncode(time.Since(started))
 	}
 }
 

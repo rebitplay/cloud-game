@@ -1,10 +1,14 @@
 package coordinator
 
 import (
+	"crypto/sha1"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"net/http"
 	"net/url"
+	"os"
+	"path/filepath"
 	"regexp"
 	"sort"
 	"strconv"
@@ -12,7 +16,9 @@ import (
 	"time"
 
 	"github.com/giongto35/cloud-game/v3/pkg/api"
+	"github.com/giongto35/cloud-game/v3/pkg/com"
 	"github.com/giongto35/cloud-game/v3/pkg/games"
+	"github.com/giongto35/cloud-game/v3/pkg/monitoring"
 )
 
 type reservedNDSWorker struct {
@@ -41,6 +47,19 @@ type ndsWorkerGroup struct {
 	workers map[int]*Worker
 }
 
+type ndsDemoRoomCreateRequest struct {
+	BaseURL   string                     `json:"base_url,omitempty"`
+	Options   api.NDSRoomOptions         `json:"options,omitempty"`
+	Players   int                        `json:"players"`
+	RomName   string                     `json:"rom_name,omitempty"`
+	RomSHA1   string                     `json:"rom_sha1,omitempty"`
+	RomURL    string                     `json:"rom_url"`
+	Room      string                     `json:"room,omitempty"`
+	Saves     []api.NDSPlayerSaveRequest `json:"saves,omitempty"`
+	SHA1      string                     `json:"sha1,omitempty"`
+	VideoCode string                     `json:"video_codec,omitempty"`
+}
+
 func (h *Hub) handleHealthz() http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodGet {
@@ -48,6 +67,50 @@ func (h *Hub) handleHealthz() http.HandlerFunc {
 			return
 		}
 		w.WriteHeader(http.StatusNoContent)
+	}
+}
+
+func (h *Hub) handleNDSDemoRoomCreate() http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodOptions {
+			w.WriteHeader(http.StatusNoContent)
+			return
+		}
+		if r.Method != http.MethodPost {
+			writeAPIError(w, http.StatusMethodNotAllowed, "method_not_allowed", "method not allowed")
+			return
+		}
+		if h.draining.Load() {
+			writeAPIJSON(w, http.StatusServiceUnavailable, api.NDSAPIError{
+				Code:          "service_draining",
+				Error:         "service is draining active NDS rooms",
+				RetryAfterSec: 60,
+			})
+			return
+		}
+		if !h.ndsCreates.allow(requestIP(r), 30, time.Minute, time.Now()) {
+			writeAPIJSON(w, http.StatusTooManyRequests, api.NDSAPIError{
+				Code:          "rate_limited",
+				Error:         "room create rate limit exceeded",
+				RetryAfterSec: 60,
+			})
+			return
+		}
+
+		var req ndsDemoRoomCreateRequest
+		dec := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<20))
+		dec.DisallowUnknownFields()
+		if err := dec.Decode(&req); err != nil {
+			writeAPIError(w, http.StatusBadRequest, "invalid_json", "invalid JSON request")
+			return
+		}
+
+		resp, status, err := h.createNDSDemoRoom(r, req)
+		if err != nil {
+			writeAPIErrorFromErr(w, err)
+			return
+		}
+		writeAPIJSON(w, status, resp)
 	}
 }
 
@@ -86,10 +149,20 @@ func (h *Hub) handleNDSRooms() http.HandlerFunc {
 			return
 		}
 
+		started := time.Now()
 		resp, status, err := h.createNDSRoomV1(req)
+		elapsed := time.Since(started)
 		if err != nil {
+			monitoring.ObserveNDSRoomCreate("error", elapsed)
+			if room := h.ndsRooms.get(req.Room); room != nil {
+				h.auditNDSRoomCreate(req.Players, room, http.StatusInternalServerError, elapsed)
+			}
 			writeAPIErrorFromErr(w, err)
 			return
+		}
+		monitoring.ObserveNDSRoomCreate(strconv.Itoa(status), elapsed)
+		if room := h.ndsRooms.get(resp.RoomID); room != nil {
+			h.auditNDSRoomCreate(req.Players, room, status, elapsed)
 		}
 		writeAPIJSON(w, status, resp)
 	}
@@ -147,6 +220,96 @@ func (h *Hub) handleNDSCapacity() http.HandlerFunc {
 			TotalRooms: envInt("NDS_MAX_ROOM_COUNT", len(h.ndsWorkerGroups())),
 		})
 	}
+}
+
+func (h *Hub) createNDSDemoRoom(r *http.Request, req ndsDemoRoomCreateRequest) (api.NDSRoomCreateResponse, int, error) {
+	roomID := cleanNDSRoomID(req.Room)
+	if roomID == "" {
+		roomID = "nds-" + com.NewUid().String()
+	}
+
+	romURL := strings.TrimSpace(req.RomURL)
+	fileName := games.NDSFileName(romURL, req.RomName, "game.nds")
+	romSHA1 := strings.ToLower(strings.TrimSpace(req.RomSHA1))
+	if romSHA1 == "" {
+		romSHA1 = strings.ToLower(strings.TrimSpace(req.SHA1))
+	}
+	if romSHA1 == "" {
+		var err error
+		romSHA1, err = localBuiltinNDSROMSHA1(romURL, fileName)
+		if err != nil {
+			return api.NDSRoomCreateResponse{}, 0, badAPIRequest("invalid_rom_sha1", "rom_sha1 is required for non-builtin ROM URLs")
+		}
+	}
+
+	options := req.Options
+	if options.VideoCodec == "" {
+		options.VideoCodec = strings.TrimSpace(req.VideoCode)
+	}
+	if options.VideoCodec == "" {
+		options.VideoCodec = "vp8"
+	}
+
+	v1Req := api.NDSRoomCreateRequest{
+		Options: options,
+		Players: req.Players,
+		Room:    roomID,
+		Rom: api.NDSRomCreate{
+			Name: fileName,
+			SHA1: romSHA1,
+			URL:  romURL,
+		},
+		PlayerSlots: makeDemoPlayerSlots(roomID, req.Players, req.Saves),
+	}
+
+	v1Resp, status, err := h.createNDSRoomV1(v1Req)
+	if err != nil {
+		return api.NDSRoomCreateResponse{}, 0, err
+	}
+
+	baseURL := publicBaseURL(r, req.BaseURL)
+	room := h.ndsRooms.get(v1Resp.RoomID)
+	seatInfo := map[int]api.NDSPlayerStream{}
+	groupID := ""
+	romPath := "nds/" + fileName
+	if room != nil {
+		room.mu.Lock()
+		groupID = room.groupID
+		if room.romPath != "" {
+			romPath = room.romPath
+		}
+		for _, seat := range room.players {
+			zone := ""
+			if seat.worker != nil {
+				zone = seat.worker.Zone
+			}
+			seatInfo[seat.player] = api.NDSPlayerStream{
+				Group:  groupID,
+				Player: seat.player,
+				RoomID: seat.roomID,
+				Zone:   zone,
+			}
+		}
+		room.mu.Unlock()
+	}
+
+	players := make([]api.NDSPlayerStream, 0, len(v1Resp.Players))
+	for _, player := range v1Resp.Players {
+		stream := seatInfo[player.Player]
+		if stream.Player == 0 {
+			stream = api.NDSPlayerStream{Group: groupID, Player: player.Player, RoomID: v1Resp.RoomID}
+		}
+		stream.URL = ndsDemoStreamURL(baseURL, stream.RoomID, stream.Zone, player.Token)
+		players = append(players, stream)
+	}
+
+	return api.NDSRoomCreateResponse{
+		Group:   groupID,
+		Game:    v1Resp.Game,
+		Players: players,
+		Room:    v1Resp.RoomID,
+		Rom:     romPath,
+	}, status, nil
 }
 
 func (h *Hub) createNDSRoomV1(req api.NDSRoomCreateRequest) (api.NDSRoomV1Response, int, error) {
@@ -368,15 +531,18 @@ func (h *Hub) handleNDSRoomDelete(w http.ResponseWriter, roomID string) {
 func (h *Hub) handleNDSRoomPlayerToken(w http.ResponseWriter, roomID string, player int) {
 	room := h.ndsRooms.live(roomID)
 	if room == nil {
+		monitoring.IncNDSTokenFailure("room_not_found")
 		writeAPIError(w, http.StatusNotFound, "room_not_found", "room not found")
 		return
 	}
 	resp, ok, err := room.tokenResponse(player, h.conf.Webrtc.IceServers, time.Now().UTC())
 	if err != nil {
+		monitoring.IncNDSTokenFailure("sign_error")
 		writeAPIError(w, http.StatusInternalServerError, "token_error", err.Error())
 		return
 	}
 	if !ok {
+		monitoring.IncNDSTokenFailure("player_not_found")
 		writeAPIError(w, http.StatusNotFound, "player_not_found", "player not found")
 		return
 	}
@@ -417,16 +583,15 @@ func validateNDSRoomCreate(req api.NDSRoomCreateRequest) error {
 		if strings.TrimSpace(slot.Ref) == "" {
 			return badAPIRequest("invalid_ref", "player ref is required")
 		}
-		if strings.TrimSpace(slot.SaveUploadURL) == "" {
-			return badAPIRequest("invalid_save_upload_url", "save_upload_url is required")
-		}
 		if slot.SaveURL != "" {
 			if err := validateNDSAPIRemoteURL(slot.SaveURL, "save_url"); err != nil {
 				return err
 			}
 		}
-		if err := validateNDSAPIRemoteURL(slot.SaveUploadURL, "save_upload_url"); err != nil {
-			return err
+		if slot.SaveUploadURL != "" {
+			if err := validateNDSAPIRemoteURL(slot.SaveUploadURL, "save_upload_url"); err != nil {
+				return err
+			}
 		}
 	}
 	if req.Options.VideoCodec != "" && req.Options.VideoCodec != "h264" && req.Options.VideoCodec != "vp8" {
@@ -445,6 +610,9 @@ func validateNDSAPIRemoteURL(rawURL string, field string) error {
 	u, err := url.Parse(strings.TrimSpace(rawURL))
 	if err != nil || u == nil {
 		return badAPIRequest("invalid_"+field, field+" is not a valid URL")
+	}
+	if field == "rom_url" && isBuiltinNDSAPIURL(u) {
+		return nil
 	}
 	if u.Scheme != "http" && u.Scheme != "https" {
 		return badAPIRequest("invalid_"+field, field+" must use http or https")
@@ -477,6 +645,125 @@ func ndsAPIAllowedRemoteHost(host string, allowlist string) bool {
 		}
 	}
 	return false
+}
+
+func makeDemoPlayerSlots(roomID string, players int, saves []api.NDSPlayerSaveRequest) []api.NDSPlayerSlotCreate {
+	saveURLs := map[int]string{}
+	for _, save := range saves {
+		if save.Player < 1 || save.Player > players {
+			continue
+		}
+		saveURL := strings.TrimSpace(save.SRMURL)
+		if saveURL == "" {
+			saveURL = strings.TrimSpace(save.SaveURL)
+		}
+		saveURLs[save.Player] = saveURL
+	}
+
+	slots := make([]api.NDSPlayerSlotCreate, 0, players)
+	for player := 1; player <= players; player++ {
+		slots = append(slots, api.NDSPlayerSlotCreate{
+			Player:  player,
+			Ref:     fmt.Sprintf("%s-p%d", roomID, player),
+			SaveURL: saveURLs[player],
+		})
+	}
+	return slots
+}
+
+func cleanNDSRoomID(room string) string {
+	room = strings.ToLower(strings.TrimSpace(room))
+	var b strings.Builder
+	lastDash := false
+	for _, r := range room {
+		if (r >= 'a' && r <= 'z') || (r >= '0' && r <= '9') {
+			b.WriteRune(r)
+			lastDash = false
+			continue
+		}
+		if !lastDash {
+			b.WriteByte('-')
+			lastDash = true
+		}
+	}
+	out := strings.Trim(b.String(), "-")
+	if len(out) > 64 {
+		out = strings.Trim(out[:64], "-")
+	}
+	if len(out) < 4 {
+		return ""
+	}
+	return out
+}
+
+func localBuiltinNDSROMSHA1(rawURL string, fileName string) (string, error) {
+	u, err := url.Parse(strings.TrimSpace(rawURL))
+	if err != nil || !isBuiltinNDSAPIURL(u) {
+		return "", fmt.Errorf("not a builtin ROM URL")
+	}
+	name := games.NDSFileName(rawURL, fileName, "game.nds")
+	if u.Opaque != "" {
+		if decoded, err := url.PathUnescape(filepath.Base(u.Opaque)); err == nil && decoded != "" {
+			name = games.NDSFileName("", decoded, "game.nds")
+		}
+	} else if u.Path != "" {
+		name = games.NDSFileName("", filepath.Base(u.Path), "game.nds")
+	}
+	var data []byte
+	var readErr error
+	for _, base := range []string{".", "../.."} {
+		data, readErr = os.ReadFile(filepath.Join(base, "assets", "games", "nds", name))
+		if readErr == nil {
+			break
+		}
+	}
+	if readErr != nil {
+		return "", readErr
+	}
+	sum := sha1.Sum(data)
+	return hex.EncodeToString(sum[:]), nil
+}
+
+func isBuiltinNDSAPIURL(u *url.URL) bool {
+	return u != nil && (u.Scheme == "builtin" || u.Scheme == "local") && (u.Opaque != "" || u.Path != "")
+}
+
+func ndsDemoStreamURL(baseURL string, roomID string, zone string, token string) string {
+	u, err := url.Parse(strings.TrimSpace(baseURL))
+	if err != nil || u.Scheme == "" || u.Host == "" {
+		u = &url.URL{Scheme: "http", Host: baseURL}
+	}
+	u.Path = "/"
+	q := u.Query()
+	q.Set("id", roomID)
+	q.Set("player", "1")
+	q.Set("client", "v9")
+	q.Set("view", "stream")
+	q.Set("token", token)
+	if zone != "" {
+		q.Set("zone", zone)
+	}
+	u.RawQuery = q.Encode()
+	return u.String()
+}
+
+func publicBaseURL(r *http.Request, override string) string {
+	if override = strings.TrimSpace(override); override != "" {
+		return strings.TrimRight(override, "/")
+	}
+	scheme := r.Header.Get("X-Forwarded-Proto")
+	if scheme == "" {
+		if r.TLS != nil {
+			scheme = "https"
+		} else {
+			scheme = "http"
+		}
+	}
+	host := r.Header.Get("X-Forwarded-Host")
+	if host == "" {
+		host = r.Host
+	}
+	return scheme + "://" + host
 }
 
 func playerSlotsByNumber(slots []api.NDSPlayerSlotCreate) map[int]api.NDSPlayerSlotCreate {
