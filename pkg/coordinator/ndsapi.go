@@ -27,6 +27,7 @@ const (
 	defaultNDSIdleTimeoutSec = 300
 	defaultNDSMaxDurationSec = 14400
 	maxNDSDurationSec        = 21600
+	ndsClosedRetention       = 10 * time.Minute
 )
 
 var (
@@ -283,11 +284,23 @@ func (h *Hub) createNDSRoomV1(req api.NDSRoomCreateRequest) (api.NDSRoomV1Respon
 
 func (h *Hub) handleNDSRoomGet(w http.ResponseWriter, roomID string) {
 	room := h.ndsRooms.get(roomID)
-	if room == nil || room.state == ndsRoomClosed {
+	if room == nil || ndsRoomExpiredFromRetention(room, time.Now().UTC()) {
 		writeAPIError(w, http.StatusNotFound, "room_not_found", "room not found")
 		return
 	}
 	writeAPIJSON(w, http.StatusOK, room.stateResponse())
+}
+
+func ndsRoomExpiredFromRetention(room *ndsRoomSession, now time.Time) bool {
+	if room == nil {
+		return true
+	}
+	room.mu.Lock()
+	defer room.mu.Unlock()
+	if room.state != ndsRoomClosed || room.closedAt == nil {
+		return false
+	}
+	return now.Sub(*room.closedAt) >= ndsClosedRetention
 }
 
 func (h *Hub) handleNDSRoomDelete(w http.ResponseWriter, roomID string) {

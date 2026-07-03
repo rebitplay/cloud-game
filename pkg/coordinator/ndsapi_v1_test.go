@@ -175,6 +175,36 @@ func TestNDSV1CreateRejectsDisallowedRemoteHost(t *testing.T) {
 	}
 }
 
+func TestNDSV1GetRetainsClosedRoomForTenMinutes(t *testing.T) {
+	h := testNDSHub(t, 0)
+	now := time.Now().UTC()
+	h.ndsRooms.put(&ndsRoomSession{
+		closedAt:  &now,
+		createdAt: now.Add(-time.Minute),
+		players:   map[int]*ndsSeat{},
+		roomID:    "room-123",
+		state:     ndsRoomClosed,
+		updatedAt: now,
+	})
+
+	retained := httptest.NewRecorder()
+	h.handleNDSRoomGet(retained, "room-123")
+	if retained.Code != http.StatusOK {
+		t.Fatalf("retained closed room status = %d, want %d; body=%s", retained.Code, http.StatusOK, retained.Body.String())
+	}
+
+	oldClosedAt := now.Add(-ndsClosedRetention - time.Second)
+	h.ndsRooms.get("room-123").mu.Lock()
+	h.ndsRooms.get("room-123").closedAt = &oldClosedAt
+	h.ndsRooms.get("room-123").mu.Unlock()
+
+	expired := httptest.NewRecorder()
+	h.handleNDSRoomGet(expired, "room-123")
+	if expired.Code != http.StatusNotFound {
+		t.Fatalf("expired closed room status = %d, want %d; body=%s", expired.Code, http.StatusNotFound, expired.Body.String())
+	}
+}
+
 func TestNDSV1CreateRateLimitPerAPIKey(t *testing.T) {
 	t.Setenv("NDS_API_KEY", "test-key")
 	t.Setenv("NDS_TOKEN_SECRET", "token-secret")
