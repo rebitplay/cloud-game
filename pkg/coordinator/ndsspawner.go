@@ -52,7 +52,7 @@ func newNDSSpawnerFromEnv(log *logger.Logger) *ndsSpawner {
 	if envBool("WEBRTC_MUX_ENABLED", false) || envBool("CLOUD_GAME_WEBRTC_MUX_ENABLED", false) {
 		defaultWebRTCBasePort = 8700
 	}
-	warmGroups := envInt("ROOM_COUNT", envInt("NDS_ROOM_COUNT", 0))
+	warmGroups := envInt("ROOM_COUNT", envInt("WARM_GROUPS", envInt("NDS_WARM_GROUPS", envInt("NDS_ROOM_COUNT", 0))))
 	maxGroups := envInt("NDS_MAX_ROOM_COUNT", defaultNDSDynamicMaxGroups)
 	if maxGroups < warmGroups {
 		maxGroups = warmGroups
@@ -166,6 +166,14 @@ func (s *ndsSpawner) startWorker(groupID string, player int) (*exec.Cmd, error) 
 
 	saveDir := filepath.Join(s.runtimeDir, groupID, fmt.Sprintf("p%d", player), "save")
 	localDir := filepath.Join(s.runtimeDir, groupID, fmt.Sprintf("p%d", player), "libretro")
+	for _, dir := range []string{saveDir, localDir} {
+		if err := os.MkdirAll(dir, 0700); err != nil {
+			return nil, err
+		}
+		if err := os.Chmod(dir, 0700); err != nil {
+			return nil, err
+		}
+	}
 
 	cmd := exec.Command(
 		s.workerPath,

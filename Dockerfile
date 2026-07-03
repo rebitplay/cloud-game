@@ -193,4 +193,10 @@ COPY assets/cores/melondslan_libretro.so ./assets/cores/
 COPY assets/games/nds/Tetris-DS-(USA).nds ./assets/games/nds/
 COPY scripts/bunny-entrypoint.sh ./bunny-entrypoint.sh
 
+RUN useradd --system --home /usr/local/share/cloud-game --shell /usr/sbin/nologin cloudgame && \
+    mkdir -p /tmp/cloud-game && \
+    chown -R cloudgame:cloudgame /usr/local/share/cloud-game /tmp/cloud-game
+
+USER cloudgame
+
 ENTRYPOINT ["./bunny-entrypoint.sh"]

@@ -3,7 +3,7 @@ set -euo pipefail
 
 APP_DIR="${APP_DIR:-/usr/local/share/cloud-game}"
 HTTP_PORT="${PORT:-${COORDINATOR_PORT:-8000}}"
-ROOM_COUNT="${ROOM_COUNT:-${NDS_ROOM_COUNT:-0}}"
+ROOM_COUNT="${ROOM_COUNT:-${WARM_GROUPS:-${NDS_WARM_GROUPS:-${NDS_ROOM_COUNT:-1}}}}"
 NDS_MAX_ROOM_COUNT="${NDS_MAX_ROOM_COUNT:-8}"
 NDS_AUTO_SPAWN="${NDS_AUTO_SPAWN:-true}"
 PLAYER_COUNT="${PLAYER_COUNT:-${NDS_PLAYERS_PER_ROOM:-4}}"
@@ -23,6 +23,9 @@ WORKER_BASE_PORT="${WORKER_BASE_PORT:-9000}"
 MONITORING_BASE_PORT="${MONITORING_BASE_PORT:-6620}"
 RUNTIME_DIR="${RUNTIME_DIR:-/tmp/cloud-game/nds-lan}"
 GAME="${GAME:-Tetris-DS-(USA)}"
+NDS_PUBLIC_ENDPOINT="${NDS_PUBLIC_ENDPOINT:-${PUBLIC_ENDPOINT:-}}"
+NDS_TURN_URLS="${NDS_TURN_URLS:-${NDS_TURN_URL:-}}"
+NDS_TURN_SECRET="${NDS_TURN_SECRET:-${NDS_TURN_SHARED_SECRET:-}}"
 
 if (( ROOM_COUNT < 1 )); then
     if (( ROOM_COUNT != 0 )); then
@@ -50,7 +53,16 @@ TOTAL_WORKERS=$((ROOM_COUNT * PLAYER_COUNT))
 MAX_WORKERS=$((NDS_MAX_ROOM_COUNT * PLAYER_COUNT))
 
 cd "$APP_DIR"
-mkdir -p "$RUNTIME_DIR"
+umask 077
+mkdir -p -m 700 "$RUNTIME_DIR"
+chmod 700 "$RUNTIME_DIR"
+
+if [[ -z "$NDS_PUBLIC_ENDPOINT" ]]; then
+    cat >&2 <<EOF
+warning: NDS_PUBLIC_ENDPOINT is not set; /v1/rooms will reject creates until it is configured.
+Set it to this container's unique public endpoint, not the anycast Host header.
+EOF
+fi
 
 pids=()
 
@@ -98,9 +110,22 @@ start_env coordinator \
     CLOUD_GAME_COORDINATOR_SERVER_CACHECONTROL="${CLOUD_GAME_COORDINATOR_SERVER_CACHECONTROL:-no-store}" \
     COORDINATOR_HOST="$COORDINATOR_HOST" \
     HUB_ADDR="$HUB_ADDR" \
+    NDS_API_KEY="${NDS_API_KEY:-}" \
+    NDS_API_KEYS="${NDS_API_KEYS:-}" \
     NDS_AUTO_SPAWN="$NDS_AUTO_SPAWN" \
+    NDS_DOWNLOAD_ALLOWED_HOSTS="${NDS_DOWNLOAD_ALLOWED_HOSTS:-}" \
     NDS_MAX_ROOM_COUNT="$NDS_MAX_ROOM_COUNT" \
     NDS_PLAYERS_PER_ROOM="$PLAYER_COUNT" \
+    NDS_PUBLIC_ENDPOINT="$NDS_PUBLIC_ENDPOINT" \
+    NDS_ROM_CACHE_MAX_BYTES="${NDS_ROM_CACHE_MAX_BYTES:-}" \
+    NDS_ROOM_JOURNAL="${NDS_ROOM_JOURNAL:-}" \
+    NDS_TOKEN_SECRET="${NDS_TOKEN_SECRET:-}" \
+    NDS_TURN_SECRET="$NDS_TURN_SECRET" \
+    NDS_TURN_SHARED_SECRET="${NDS_TURN_SHARED_SECRET:-$NDS_TURN_SECRET}" \
+    NDS_TURN_URLS="$NDS_TURN_URLS" \
+    NDS_TURN_URL="${NDS_TURN_URL:-}" \
+    NDS_WEBHOOK_SECRET="${NDS_WEBHOOK_SECRET:-}" \
+    NDS_WEBHOOK_URL="${NDS_WEBHOOK_URL:-}" \
     ROOM_COUNT="$ROOM_COUNT" \
     RUNTIME_DIR="$RUNTIME_DIR" \
     WEBRTC_BASE_PORT="$WEBRTC_BASE_PORT" \
@@ -129,6 +154,8 @@ if (( ROOM_COUNT > 0 )); then
             webrtc_port=$((WEBRTC_BASE_PORT + global_slot))
             save_dir="${RUNTIME_DIR}/${group_name}/p${player}/save"
             local_dir="${RUNTIME_DIR}/${group_name}/p${player}/libretro"
+            mkdir -p -m 700 "$save_dir" "$local_dir"
+            chmod 700 "$save_dir" "$local_dir"
             netplay_client_id=$((player - 1))
             zone="${group_name}-p${player}"
             printf -v mac_address '00:08:BF:%02X:00:%02X' "$group" "$player"
@@ -146,6 +173,8 @@ if (( ROOM_COUNT > 0 )); then
                 CLOUD_GAME_WEBRTC_ICEIPMAP="${CLOUD_GAME_WEBRTC_ICEIPMAP:-${BUNNY_ANYCAST_IP:-}}" \
                 CLOUD_GAME_EMULATOR_STORAGE="$save_dir" \
                 CLOUD_GAME_EMULATOR_LOCALPATH="$local_dir" \
+                NDS_DOWNLOAD_ALLOWED_HOSTS="${NDS_DOWNLOAD_ALLOWED_HOSTS:-}" \
+                NDS_ROM_CACHE_MAX_BYTES="${NDS_ROM_CACHE_MAX_BYTES:-}" \
                 MELONDS_NETPLAY_HUB="$HUB_ADDR" \
                 MELONDS_NETPLAY_ROOM="$ROOM" \
                 MELONDS_NETPLAY_CLIENT_ID="$netplay_client_id" \
@@ -167,6 +196,8 @@ Warm NDS room groups: ${ROOM_COUNT}
 Max lazy NDS room groups: ${NDS_MAX_ROOM_COUNT}
 Warm NDS workers: ${TOTAL_WORKERS}
 Max NDS workers: ${MAX_WORKERS}
+NDS public endpoint: ${NDS_PUBLIC_ENDPOINT:-<unset>}
+NDS download allowlist: ${NDS_DOWNLOAD_ALLOWED_HOSTS:-<unset>}
 
 EOF
 
@@ -183,7 +214,7 @@ fi
 
 cat <<EOF
 Set CLOUD_GAME_WEBRTC_ICEIPMAP or BUNNY_ANYCAST_IP to the public Anycast IP for remote WebRTC.
-For Firefox or strict NAT fallback, set WEBRTC_TURN_URLS, WEBRTC_TURN_USERNAME, and WEBRTC_TURN_CREDENTIAL.
+For Firefox or strict NAT fallback, set NDS_TURN_URLS and NDS_TURN_SECRET.
 EOF
 
 set +e
