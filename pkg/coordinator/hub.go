@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/url"
+	"time"
 
 	"github.com/giongto35/cloud-game/v3/pkg/api"
 	"github.com/giongto35/cloud-game/v3/pkg/com"
@@ -24,8 +25,10 @@ type Connection interface {
 type Hub struct {
 	conf       config.CoordinatorConfig
 	log        *logger.Logger
+	ndsCreates *fixedWindowLimiter
 	ndsSpawner *ndsSpawner
 	ndsRooms   *ndsRoomRegistry
+	ndsWS      *fixedWindowLimiter
 	users      com.NetMap[com.Uid, *User]
 	webrtcMux  *webRTCMux
 	workers    com.NetMap[com.Uid, *Worker]
@@ -36,8 +39,10 @@ func NewHub(conf config.CoordinatorConfig, log *logger.Logger) *Hub {
 		conf:       conf,
 		users:      com.NewNetMap[com.Uid, *User](),
 		workers:    com.NewNetMap[com.Uid, *Worker](),
+		ndsCreates: newFixedWindowLimiter(),
 		ndsSpawner: newNDSSpawnerFromEnv(log),
 		ndsRooms:   newNDSRoomRegistry(),
+		ndsWS:      newFixedWindowLimiter(),
 		log:        log,
 	}
 	hub.emitNDSOrphanJournal()
@@ -75,6 +80,10 @@ func (h *Hub) handleUserConnection() http.HandlerFunc {
 
 	return func(w http.ResponseWriter, r *http.Request) {
 		h.log.Debug().Msgf("Handshake %v", r.Host)
+		if !h.ndsWS.allow(requestIP(r), 10, time.Minute, time.Now()) {
+			http.Error(w, "rate limit exceeded", http.StatusTooManyRequests)
+			return
+		}
 
 		params := r.URL.Query()
 		ndsSession, err := h.resolveNDSUserSession(params)

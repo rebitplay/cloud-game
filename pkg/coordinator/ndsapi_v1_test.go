@@ -145,6 +145,53 @@ func TestNDSV1CreateValidationAndCapacityErrors(t *testing.T) {
 	}
 }
 
+func TestNDSV1CreateRateLimitPerAPIKey(t *testing.T) {
+	t.Setenv("NDS_API_KEY", "test-key")
+	t.Setenv("NDS_TOKEN_SECRET", "token-secret")
+	t.Setenv("NDS_PUBLIC_ENDPOINT", "https://sg-1.nds.rebitplay.com")
+
+	h := testNDSHub(t, 1)
+	body := testNDSCreateBody("room-123", 2)
+	for i := 0; i < 30; i++ {
+		resp := postNDSRoom(t, h, body)
+		if resp.Code != http.StatusCreated && resp.Code != http.StatusOK {
+			t.Fatalf("create %d status = %d; body=%s", i+1, resp.Code, resp.Body.String())
+		}
+	}
+	limited := postNDSRoom(t, h, body)
+	if limited.Code != http.StatusTooManyRequests {
+		t.Fatalf("rate limited status = %d, want %d; body=%s", limited.Code, http.StatusTooManyRequests, limited.Body.String())
+	}
+	var errResp api.NDSAPIError
+	if err := json.Unmarshal(limited.Body.Bytes(), &errResp); err != nil {
+		t.Fatal(err)
+	}
+	if errResp.Code != "rate_limited" || errResp.RetryAfterSec == 0 {
+		t.Fatalf("unexpected rate limit body: %#v", errResp)
+	}
+}
+
+func TestNDSWSRateLimitPerIP(t *testing.T) {
+	h := testNDSHub(t, 0)
+	handler := h.handleUserConnection()
+	for i := 0; i < 10; i++ {
+		rr := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodGet, "/ws?token=bad", nil)
+		req.RemoteAddr = "198.51.100.9:12345"
+		handler(rr, req)
+		if rr.Code != http.StatusUnauthorized {
+			t.Fatalf("ws attempt %d status = %d, want %d", i+1, rr.Code, http.StatusUnauthorized)
+		}
+	}
+	rr := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/ws?token=bad", nil)
+	req.RemoteAddr = "198.51.100.9:12345"
+	handler(rr, req)
+	if rr.Code != http.StatusTooManyRequests {
+		t.Fatalf("ws rate limited status = %d, want %d", rr.Code, http.StatusTooManyRequests)
+	}
+}
+
 func TestNDSSeatTokenValidation(t *testing.T) {
 	t.Setenv("NDS_TOKEN_SECRET", "token-secret")
 	now := time.Now().UTC()

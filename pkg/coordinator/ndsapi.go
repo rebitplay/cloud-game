@@ -59,6 +59,15 @@ func (h *Hub) handleNDSRooms() http.HandlerFunc {
 			writeAPIError(w, http.StatusMethodNotAllowed, "method_not_allowed", "method not allowed")
 			return
 		}
+		apiKey, _ := ndsAPIKeyFromAuthorization(r.Header.Get("Authorization"))
+		if !h.ndsCreates.allow(apiKey, 30, time.Minute, time.Now()) {
+			writeAPIJSON(w, http.StatusTooManyRequests, api.NDSAPIError{
+				Code:          "rate_limited",
+				Error:         "room create rate limit exceeded",
+				RetryAfterSec: 60,
+			})
+			return
+		}
 		var req api.NDSRoomCreateRequest
 		dec := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<20))
 		dec.DisallowUnknownFields()

@@ -28,7 +28,7 @@ type ndsTokenClaims struct {
 
 func (h *Hub) requireNDSAPIKey(next http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		if !validNDSAPIKey(r.Header.Get("Authorization")) {
+		if _, ok := ndsAPIKeyFromAuthorization(r.Header.Get("Authorization")); !ok {
 			writeAPIError(w, http.StatusUnauthorized, "unauthorized", "missing or invalid API key")
 			return
 		}
@@ -37,20 +37,25 @@ func (h *Hub) requireNDSAPIKey(next http.HandlerFunc) http.HandlerFunc {
 }
 
 func validNDSAPIKey(header string) bool {
+	_, ok := ndsAPIKeyFromAuthorization(header)
+	return ok
+}
+
+func ndsAPIKeyFromAuthorization(header string) (string, bool) {
 	const prefix = "Bearer "
 	if !strings.HasPrefix(header, prefix) {
-		return false
+		return "", false
 	}
 	got := strings.TrimSpace(strings.TrimPrefix(header, prefix))
 	if got == "" {
-		return false
+		return "", false
 	}
 	for _, key := range ndsAPIKeys() {
 		if subtle.ConstantTimeCompare([]byte(got), []byte(key)) == 1 {
-			return true
+			return key, true
 		}
 	}
-	return false
+	return "", false
 }
 
 func ndsAPIKeys() []string {
