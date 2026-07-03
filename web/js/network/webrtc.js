@@ -12,13 +12,22 @@ const ice = ((signaller) => {
     // the remote description is not available.
     // Then it is flushed as soon as the remote description is set.
     let /** @type {RTCIceCandidateInit[]} */ buf = [];
+    let /** @type {RTCIceCandidateInit[]} */ localBuf = [];
 
     const END_OF_CANDIDATES = null;
 
+    const candidateInit = (candidate) =>
+        typeof candidate?.toJSON === "function" ? candidate.toJSON() : candidate;
+
     const onCandidate = (/** @type {RTCPeerConnectionIceEvent} */ ev) => {
         if (!ev.candidate) return;
-        const candidate = ev.candidate?.toJSON?.() ?? ev.candidate;
+        const candidate = candidateInit(ev.candidate);
         log.debug(`[rtc] [ice] local`, candidate);
+        if (sdpExchangePending) {
+            localBuf.push(candidate);
+            log.debug(`[rtc] [ice] local candidate buffered (${localBuf.length})`);
+            return;
+        }
         signaller()?.sendIceCandidate(candidate);
     };
 
@@ -79,6 +88,14 @@ const ice = ((signaller) => {
         }
     };
 
+    const flushLocal = () => {
+        if (localBuf.length === 0) return;
+        log.debug(`[rtc] [ice] local buf (${localBuf.length}) flush`);
+        while (localBuf.length) {
+            signaller()?.sendIceCandidate(localBuf.shift());
+        }
+    };
+
     return {
         onCandidate,
         onCandidateError,
@@ -86,7 +103,11 @@ const ice = ((signaller) => {
         onConnectionStateChange,
         add,
         flush,
-        close: () => (buf = []),
+        flushLocal,
+        close: () => {
+            buf = [];
+            localBuf = [];
+        },
     };
 })(() => signal);
 
@@ -258,6 +279,7 @@ export const webrtc = {
                 })
                 .finally(() => {
                     sdpExchangePending = false;
+                    ice.flushLocal();
                 });
         } else {
             signalling.init();
@@ -294,6 +316,7 @@ export const webrtc = {
             log.error("[rtc] [sdp] local:", e);
         } finally {
             sdpExchangePending = false;
+            ice.flushLocal();
         }
     },
     candidate: (/** @type {RTCIceCandidateInit | string} */ candidate) => {

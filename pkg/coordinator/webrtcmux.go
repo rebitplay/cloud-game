@@ -498,6 +498,10 @@ func rewriteICECandidate(candidate string, host string, port int) (string, bool)
 	if !strings.EqualFold(fields[2], "udp") {
 		return candidate, false
 	}
+	candidateType := candidateAttribute(candidate, "typ")
+	if strings.EqualFold(candidateType, "relay") {
+		return candidate, false
+	}
 	if host != "" {
 		fields[4] = host
 	}
