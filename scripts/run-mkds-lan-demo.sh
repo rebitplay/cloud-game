@@ -155,6 +155,7 @@ cat <<EOF
 NDS LAN demo is starting with ${ROOM_COUNT} warm room group(s), ${TOTAL_WORKERS} warm worker(s).
 Lazy capacity is ${NDS_MAX_ROOM_COUNT} room group(s), ${MAX_WORKERS} worker port(s).
 WebRTC mux: ${WEBRTC_MUX_ENABLED}, public UDP port: ${WEBRTC_PUBLIC_PORT}, worker base UDP port: ${WEBRTC_BASE_PORT}.
+Firefox/strict NAT fallback: set WEBRTC_TURN_URLS, WEBRTC_TURN_USERNAME, and WEBRTC_TURN_CREDENTIAL.
 
 Open:
   http://fedora${COORDINATOR_ADDR}/mkds-lan.html?room=${ROOM}&players=${PLAYER_COUNT}&game=${GAME}

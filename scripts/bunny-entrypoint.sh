@@ -183,6 +183,7 @@ fi
 
 cat <<EOF
 Set CLOUD_GAME_WEBRTC_ICEIPMAP or BUNNY_ANYCAST_IP to the public Anycast IP for remote WebRTC.
+For Firefox or strict NAT fallback, set WEBRTC_TURN_URLS, WEBRTC_TURN_USERNAME, and WEBRTC_TURN_CREDENTIAL.
 EOF
 
 set +e

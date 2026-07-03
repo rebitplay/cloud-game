@@ -41,6 +41,7 @@ func NewCoordinatorConfig() (conf CoordinatorConfig, paths []string) {
 	if err != nil {
 		panic(err)
 	}
+	conf.Webrtc.ApplyEnvOverrides()
 	return
 }
 

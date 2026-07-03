@@ -98,6 +98,7 @@ func NewWorkerConfig() (conf WorkerConfig, paths []string) {
 	if err != nil {
 		panic(err)
 	}
+	conf.Webrtc.ApplyEnvOverrides()
 	conf.expandSpecialTags()
 	conf.fixValues()
 	return

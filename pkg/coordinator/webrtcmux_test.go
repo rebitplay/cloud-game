@@ -3,6 +3,7 @@ package coordinator
 import (
 	"encoding/binary"
 	"encoding/json"
+	"net"
 	"strings"
 	"testing"
 )
@@ -53,5 +54,31 @@ func TestStunUsername(t *testing.T) {
 	first, second := splitICEUsername(got)
 	if first != "worker123" || second != "browser456" {
 		t.Fatalf("split mismatch: %q %q", first, second)
+	}
+}
+
+func TestBrowserDestsReturnsAllLearnedBrowserAddrs(t *testing.T) {
+	mux := &webRTCMux{}
+	route := &webRTCMuxRoute{
+		browserAddr: &net.UDPAddr{IP: net.ParseIP("198.51.100.2"), Port: 40000},
+		browserAddrs: map[string]*net.UDPAddr{
+			"198.51.100.2:40000": &net.UDPAddr{IP: net.ParseIP("198.51.100.2"), Port: 40000},
+			"198.51.100.2:40001": &net.UDPAddr{IP: net.ParseIP("198.51.100.2"), Port: 40001},
+		},
+	}
+
+	dests := mux.browserDests(route)
+	if len(dests) != 2 {
+		t.Fatalf("browser dest count = %d, want 2: %#v", len(dests), dests)
+	}
+	if got := dests[0].String(); got != "198.51.100.2:40000" {
+		t.Fatalf("preferred dest = %q, want 198.51.100.2:40000", got)
+	}
+	seen := map[string]bool{}
+	for _, dst := range dests {
+		seen[dst.String()] = true
+	}
+	if !seen["198.51.100.2:40000"] || !seen["198.51.100.2:40001"] {
+		t.Fatalf("browser dests missing learned addresses: %#v", seen)
 	}
 }

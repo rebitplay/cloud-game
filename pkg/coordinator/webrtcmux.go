@@ -239,10 +239,25 @@ func (m *webRTCMux) browserDests(route *webRTCMuxRoute) []*net.UDPAddr {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 
-	if route.browserAddr == nil {
+	if route.browserAddr == nil && len(route.browserAddrs) == 0 {
 		return nil
 	}
-	return []*net.UDPAddr{route.browserAddr}
+	dests := make([]*net.UDPAddr, 0, len(route.browserAddrs)+1)
+	seen := map[string]struct{}{}
+	if route.browserAddr != nil {
+		dests = append(dests, route.browserAddr)
+		seen[route.browserAddr.String()] = struct{}{}
+	}
+	for key, addr := range route.browserAddrs {
+		if addr == nil {
+			continue
+		}
+		if _, ok := seen[key]; ok {
+			continue
+		}
+		dests = append(dests, addr)
+	}
+	return dests
 }
 
 func preferBrowserAddr(current *net.UDPAddr, next *net.UDPAddr) bool {
