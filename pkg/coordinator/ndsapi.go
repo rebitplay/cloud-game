@@ -156,6 +156,14 @@ func (h *Hub) createNDSRoomV1(req api.NDSRoomCreateRequest) (api.NDSRoomV1Respon
 	if joinTimeout <= 0 {
 		joinTimeout = defaultNDSJoinTimeoutSec
 	}
+	idleTimeout := req.Options.IdleTimeoutSec
+	if idleTimeout <= 0 {
+		idleTimeout = defaultNDSIdleTimeoutSec
+	}
+	maxDuration := req.Options.MaxDurationSec
+	if maxDuration <= 0 {
+		maxDuration = defaultNDSMaxDurationSec
+	}
 
 	reserved, groupID, err := h.reserveNDSGroup(req.Players, roomID, gameName)
 	if err != nil && isNDSCapacityConflict(err) {
@@ -231,7 +239,9 @@ func (h *Hub) createNDSRoomV1(req api.NDSRoomCreateRequest) (api.NDSRoomV1Respon
 		endpoint:     endpoint,
 		game:         gameName,
 		groupID:      groupID,
+		idleTimeout:  time.Duration(idleTimeout) * time.Second,
 		joinDeadline: now.Add(time.Duration(joinTimeout) * time.Second),
+		maxDuration:  time.Duration(maxDuration) * time.Second,
 		players:      players,
 		reserved:     reserved,
 		roomID:       roomID,
@@ -240,6 +250,8 @@ func (h *Hub) createNDSRoomV1(req api.NDSRoomCreateRequest) (api.NDSRoomV1Respon
 		updatedAt:    now,
 	}
 	h.ndsRooms.put(session)
+	h.startNDSRoomLifecycle(session)
+	h.emitNDSWebhook("room.ready", session, nil)
 
 	releaseOnFailure = false
 	resp, err := session.response(h.conf.Webrtc.IceServers, now)
@@ -259,13 +271,11 @@ func (h *Hub) handleNDSRoomGet(w http.ResponseWriter, roomID string) {
 }
 
 func (h *Hub) handleNDSRoomDelete(w http.ResponseWriter, roomID string) {
-	now := time.Now().UTC()
-	room := h.ndsRooms.close(roomID, now)
+	room := h.closeNDSRoom(roomID, ndsCloseHost)
 	if room == nil {
 		writeAPIError(w, http.StatusNotFound, "room_not_found", "room not found")
 		return
 	}
-	releaseNDSReservations(room.reserved)
 	writeAPIJSON(w, http.StatusAccepted, room.stateResponse())
 }
 

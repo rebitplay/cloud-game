@@ -61,6 +61,7 @@ func (h *Hub) attachNDSUser(user *User) {
 		old.Disconnect()
 		h.users.Remove(old)
 	}
+	h.markNDSPlayerConnected(user)
 }
 
 func (h *Hub) detachNDSUser(user *User) {
@@ -81,4 +82,5 @@ func (h *Hub) detachNDSUser(user *User) {
 		room.updatedAt = now
 	}
 	room.mu.Unlock()
+	h.markNDSPlayerDisconnected(user)
 }

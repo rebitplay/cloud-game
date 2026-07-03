@@ -30,11 +30,17 @@ type ndsRoomSession struct {
 	mu           sync.Mutex
 	closedAt     *time.Time
 	createdAt    time.Time
+	idleTimeout  time.Duration
 	endpoint     string
 	game         string
 	groupID      string
+	idleTimer    *time.Timer
 	joinDeadline time.Time
+	joinTimer    *time.Timer
+	maxDuration  time.Duration
+	maxTimer     *time.Timer
 	players      map[int]*ndsSeat
+	reason       string
 	reserved     []reservedNDSWorker
 	roomID       string
 	romPath      string
@@ -177,6 +183,30 @@ func (s *ndsRoomSession) stateResponse() api.NDSRoomStateResponse {
 		StartedAt: s.startedAt,
 		State:     s.state,
 		UpdatedAt: s.updatedAt,
+	}
+}
+
+func (s *ndsRoomSession) allDisconnectedLocked() bool {
+	for _, seat := range s.players {
+		if seat.connected {
+			return false
+		}
+	}
+	return true
+}
+
+func (s *ndsRoomSession) stopTimersLocked() {
+	if s.joinTimer != nil {
+		s.joinTimer.Stop()
+		s.joinTimer = nil
+	}
+	if s.idleTimer != nil {
+		s.idleTimer.Stop()
+		s.idleTimer = nil
+	}
+	if s.maxTimer != nil {
+		s.maxTimer.Stop()
+		s.maxTimer = nil
 	}
 }
 

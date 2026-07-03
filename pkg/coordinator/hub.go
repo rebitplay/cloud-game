@@ -32,7 +32,7 @@ type Hub struct {
 }
 
 func NewHub(conf config.CoordinatorConfig, log *logger.Logger) *Hub {
-	return &Hub{
+	hub := &Hub{
 		conf:       conf,
 		users:      com.NewNetMap[com.Uid, *User](),
 		workers:    com.NewNetMap[com.Uid, *Worker](),
@@ -40,6 +40,8 @@ func NewHub(conf config.CoordinatorConfig, log *logger.Logger) *Hub {
 		ndsRooms:   newNDSRoomRegistry(),
 		log:        log,
 	}
+	hub.emitNDSOrphanJournal()
+	return hub
 }
 
 func (h *Hub) StartWebRTCMuxFromEnv() error {
@@ -52,6 +54,7 @@ func (h *Hub) StartWebRTCMuxFromEnv() error {
 }
 
 func (h *Hub) Stop() {
+	h.closeAllNDSRooms(ndsCloseError)
 	if h.ndsSpawner != nil {
 		h.ndsSpawner.stop()
 	}
