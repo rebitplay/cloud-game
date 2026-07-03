@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/url"
+	"sync/atomic"
 	"time"
 
 	"github.com/giongto35/cloud-game/v3/pkg/api"
@@ -24,6 +25,7 @@ type Connection interface {
 
 type Hub struct {
 	conf       config.CoordinatorConfig
+	draining   atomic.Bool
 	log        *logger.Logger
 	ndsCreates *fixedWindowLimiter
 	ndsSpawner *ndsSpawner
@@ -59,7 +61,18 @@ func (h *Hub) StartWebRTCMuxFromEnv() error {
 }
 
 func (h *Hub) Stop() {
-	h.closeAllNDSRooms(ndsCloseError)
+	h.draining.Store(true)
+	done := make(chan struct{})
+	go func() {
+		h.closeAllNDSRooms(ndsCloseError)
+		close(done)
+	}()
+	timeout := envDuration("NDS_DRAIN_TIMEOUT", 60*time.Second)
+	select {
+	case <-done:
+	case <-time.After(timeout):
+		h.log.Warn().Dur("timeout", timeout).Msg("NDS room drain timed out")
+	}
 	if h.ndsSpawner != nil {
 		h.ndsSpawner.stop()
 	}

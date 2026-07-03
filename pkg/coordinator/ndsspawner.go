@@ -113,39 +113,47 @@ func (h *Hub) spawnNDSGroup(players int) error {
 
 func (s *ndsSpawner) spawnGroup(h *Hub, players int) error {
 	s.mu.Lock()
-	defer s.mu.Unlock()
-
 	if s.nextGroup > s.maxGroups {
+		s.mu.Unlock()
 		return apiConflict(fmt.Sprintf("dynamic NDS room capacity exhausted: max groups %d", s.maxGroups))
 	}
 
 	groupID := fmt.Sprintf("mkds-r%d", s.nextGroup)
 	s.nextGroup++
+	s.mu.Unlock()
 
+	return s.startGroup(h, groupID, players)
+}
+
+func (s *ndsSpawner) startGroup(h *Hub, groupID string, requestedPlayers int) error {
 	s.log.Info().
 		Str("group", groupID).
 		Int("workers", s.playersPerGroup).
-		Int("requested_players", players).
+		Int("requested_players", requestedPlayers).
 		Msg("spawning NDS worker group")
 
 	commands := make([]*exec.Cmd, 0, s.playersPerGroup)
 	for player := 1; player <= s.playersPerGroup; player++ {
 		cmd, err := s.startWorker(groupID, player)
 		if err != nil {
-			for _, started := range commands {
-				if started.Process != nil {
-					_ = started.Process.Kill()
-				}
-			}
+			killNDSCommands(commands)
 			return err
 		}
 		commands = append(commands, cmd)
 	}
+
+	s.mu.Lock()
+	if _, exists := s.processes[groupID]; exists {
+		s.mu.Unlock()
+		killNDSCommands(commands)
+		return fmt.Errorf("NDS worker group %s is already running", groupID)
+	}
 	s.processes[groupID] = commands
+	s.mu.Unlock()
 
 	deadline := time.Now().Add(s.timeout)
 	for time.Now().Before(deadline) {
-		if h.ndsGroupCanHost(groupID, players) {
+		if h.ndsGroupCanHost(groupID, requestedPlayers) {
 			return nil
 		}
 		time.Sleep(200 * time.Millisecond)
@@ -216,13 +224,30 @@ func (s *ndsSpawner) startWorker(groupID string, player int) (*exec.Cmd, error) 
 }
 
 func (s *ndsSpawner) killGroup(groupID string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.killGroupLocked(groupID)
+}
+
+func (s *ndsSpawner) killGroupLocked(groupID string) {
 	commands := s.processes[groupID]
+	killNDSCommands(commands)
+	delete(s.processes, groupID)
+}
+
+func (s *ndsSpawner) ownsGroup(groupID string) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	_, ok := s.processes[groupID]
+	return ok
+}
+
+func killNDSCommands(commands []*exec.Cmd) {
 	for _, cmd := range commands {
 		if cmd.Process != nil {
 			_ = cmd.Process.Kill()
 		}
 	}
-	delete(s.processes, groupID)
 }
 
 func (h *Hub) ndsGroupCanHost(groupID string, players int) bool {

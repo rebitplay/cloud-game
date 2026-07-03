@@ -145,6 +145,32 @@ func TestNDSV1CreateValidationAndCapacityErrors(t *testing.T) {
 	}
 }
 
+func TestNDSV1CreateRejectsDisallowedRemoteHost(t *testing.T) {
+	t.Setenv("NDS_API_KEY", "test-key")
+	t.Setenv("NDS_TOKEN_SECRET", "token-secret")
+	t.Setenv("NDS_PUBLIC_ENDPOINT", "https://sg-1.nds.rebitplay.com")
+	t.Setenv("NDS_DOWNLOAD_ALLOWED_HOSTS", "cdn.rebitplay.com")
+
+	h := testNDSHub(t, 1)
+	var req api.NDSRoomCreateRequest
+	if err := json.Unmarshal(testNDSCreateBody("room-123", 2), &req); err != nil {
+		t.Fatal(err)
+	}
+	req.Rom.URL = "https://evil.example/rom.nds"
+	body, _ := json.Marshal(req)
+	resp := postNDSRoom(t, h, body)
+	if resp.Code != http.StatusBadRequest {
+		t.Fatalf("bad host status = %d, want %d; body=%s", resp.Code, http.StatusBadRequest, resp.Body.String())
+	}
+	var errResp api.NDSAPIError
+	if err := json.Unmarshal(resp.Body.Bytes(), &errResp); err != nil {
+		t.Fatal(err)
+	}
+	if errResp.Code != "invalid_rom_url" {
+		t.Fatalf("bad host code = %q, want invalid_rom_url", errResp.Code)
+	}
+}
+
 func TestNDSV1CreateRateLimitPerAPIKey(t *testing.T) {
 	t.Setenv("NDS_API_KEY", "test-key")
 	t.Setenv("NDS_TOKEN_SECRET", "token-secret")
@@ -168,6 +194,26 @@ func TestNDSV1CreateRateLimitPerAPIKey(t *testing.T) {
 	}
 	if errResp.Code != "rate_limited" || errResp.RetryAfterSec == 0 {
 		t.Fatalf("unexpected rate limit body: %#v", errResp)
+	}
+}
+
+func TestNDSV1CreateRejectedWhileDraining(t *testing.T) {
+	t.Setenv("NDS_API_KEY", "test-key")
+	t.Setenv("NDS_TOKEN_SECRET", "token-secret")
+	t.Setenv("NDS_PUBLIC_ENDPOINT", "https://sg-1.nds.rebitplay.com")
+
+	h := testNDSHub(t, 1)
+	h.draining.Store(true)
+	resp := postNDSRoom(t, h, testNDSCreateBody("room-123", 2))
+	if resp.Code != http.StatusServiceUnavailable {
+		t.Fatalf("draining status = %d, want %d; body=%s", resp.Code, http.StatusServiceUnavailable, resp.Body.String())
+	}
+	var errResp api.NDSAPIError
+	if err := json.Unmarshal(resp.Body.Bytes(), &errResp); err != nil {
+		t.Fatal(err)
+	}
+	if errResp.Code != "service_draining" || errResp.RetryAfterSec == 0 {
+		t.Fatalf("unexpected draining body: %#v", errResp)
 	}
 }
 

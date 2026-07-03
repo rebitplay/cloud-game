@@ -150,6 +150,7 @@ func (h *Hub) closeNDSRoom(roomID string, reason string) *ndsRoomSession {
 		user.Disconnect()
 	}
 	releaseNDSReservations(room.reserved)
+	h.recycleNDSGroup(room.groupID)
 
 	room.mu.Lock()
 	room.state = ndsRoomClosed

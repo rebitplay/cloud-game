@@ -160,3 +160,41 @@ func TestNDSRoomCloseFlushesSavesAndReportsStatuses(t *testing.T) {
 		t.Fatalf("stored save status = %q, want uploaded", got)
 	}
 }
+
+func TestNDSRoomCloseRecyclesWorkersAndRuntimeDir(t *testing.T) {
+	t.Setenv("NDS_API_KEY", "test-key")
+	t.Setenv("NDS_TOKEN_SECRET", "token-secret")
+	t.Setenv("NDS_PUBLIC_ENDPOINT", "https://sg-1.nds.rebitplay.com")
+	runtimeDir := t.TempDir()
+	t.Setenv("RUNTIME_DIR", runtimeDir)
+
+	h := testNDSHub(t, 1)
+	create := postNDSRoom(t, h, testNDSCreateBody("room-123", 2))
+	if create.Code != http.StatusCreated {
+		t.Fatalf("create status = %d, want %d; body=%s", create.Code, http.StatusCreated, create.Body.String())
+	}
+
+	groupDir := filepath.Join(runtimeDir, "mkds-r1")
+	saveFile := filepath.Join(groupDir, "p1", "save", "leak.srm")
+	if err := os.MkdirAll(filepath.Dir(saveFile), 0700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(saveFile, []byte("old-save"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if len(h.ndsWorkersForGroup("mkds-r1")) != 4 {
+		t.Fatalf("test setup worker count = %d, want 4", len(h.ndsWorkersForGroup("mkds-r1")))
+	}
+
+	h.closeNDSRoom("room-123", ndsCloseHost)
+
+	if len(h.ndsWorkersForGroup("mkds-r1")) != 0 {
+		t.Fatalf("workers were not recycled: %d still registered", len(h.ndsWorkersForGroup("mkds-r1")))
+	}
+	if _, err := os.Stat(groupDir); !os.IsNotExist(err) {
+		t.Fatalf("group runtime dir still exists after recycle: %v", err)
+	}
+	if got := h.ndsRooms.get("room-123").state; got != ndsRoomClosed {
+		t.Fatalf("room state = %s, want %s", got, ndsRoomClosed)
+	}
+}

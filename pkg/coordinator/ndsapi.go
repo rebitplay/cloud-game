@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"net/url"
 	"regexp"
 	"sort"
 	"strconv"
@@ -57,6 +58,14 @@ func (h *Hub) handleNDSRooms() http.HandlerFunc {
 		}
 		if r.Method != http.MethodPost {
 			writeAPIError(w, http.StatusMethodNotAllowed, "method_not_allowed", "method not allowed")
+			return
+		}
+		if h.draining.Load() {
+			writeAPIJSON(w, http.StatusServiceUnavailable, api.NDSAPIError{
+				Code:          "service_draining",
+				Error:         "service is draining active NDS rooms",
+				RetryAfterSec: 60,
+			})
 			return
 		}
 		apiKey, _ := ndsAPIKeyFromAuthorization(r.Header.Get("Authorization"))
@@ -318,6 +327,9 @@ func validateNDSRoomCreate(req api.NDSRoomCreateRequest) error {
 	if strings.TrimSpace(req.Rom.URL) == "" {
 		return badAPIRequest("invalid_rom_url", "rom.url is required")
 	}
+	if err := validateNDSAPIRemoteURL(req.Rom.URL, "rom_url"); err != nil {
+		return err
+	}
 	if strings.TrimSpace(req.Rom.Name) == "" {
 		return badAPIRequest("invalid_rom_name", "rom.name is required")
 	}
@@ -342,6 +354,14 @@ func validateNDSRoomCreate(req api.NDSRoomCreateRequest) error {
 		if strings.TrimSpace(slot.SaveUploadURL) == "" {
 			return badAPIRequest("invalid_save_upload_url", "save_upload_url is required")
 		}
+		if slot.SaveURL != "" {
+			if err := validateNDSAPIRemoteURL(slot.SaveURL, "save_url"); err != nil {
+				return err
+			}
+		}
+		if err := validateNDSAPIRemoteURL(slot.SaveUploadURL, "save_upload_url"); err != nil {
+			return err
+		}
 	}
 	if req.Options.VideoCodec != "" && req.Options.VideoCodec != "h264" && req.Options.VideoCodec != "vp8" {
 		return badAPIRequest("invalid_video_codec", "video_codec must be h264 or vp8")
@@ -353,6 +373,44 @@ func validateNDSRoomCreate(req api.NDSRoomCreateRequest) error {
 		return badAPIRequest("invalid_timeout", "timeout values must be positive")
 	}
 	return nil
+}
+
+func validateNDSAPIRemoteURL(rawURL string, field string) error {
+	u, err := url.Parse(strings.TrimSpace(rawURL))
+	if err != nil || u == nil {
+		return badAPIRequest("invalid_"+field, field+" is not a valid URL")
+	}
+	if u.Scheme != "http" && u.Scheme != "https" {
+		return badAPIRequest("invalid_"+field, field+" must use http or https")
+	}
+	host := strings.ToLower(u.Hostname())
+	if host == "" {
+		return badAPIRequest("invalid_"+field, field+" host is required")
+	}
+	if allowlist := strings.TrimSpace(firstNonEmptyEnv("NDS_DOWNLOAD_ALLOWED_HOSTS")); allowlist != "" && !ndsAPIAllowedRemoteHost(host, allowlist) {
+		return badAPIRequest("invalid_"+field, field+" host is not allowed")
+	}
+	return nil
+}
+
+func ndsAPIAllowedRemoteHost(host string, allowlist string) bool {
+	for _, pattern := range strings.Split(allowlist, ",") {
+		pattern = strings.ToLower(strings.TrimSpace(pattern))
+		if pattern == "" {
+			continue
+		}
+		if strings.HasPrefix(pattern, "*.") {
+			suffix := strings.TrimPrefix(pattern, "*")
+			if strings.HasSuffix(host, suffix) && host != strings.TrimPrefix(suffix, ".") {
+				return true
+			}
+			continue
+		}
+		if host == pattern {
+			return true
+		}
+	}
+	return false
 }
 
 func playerSlotsByNumber(slots []api.NDSPlayerSlotCreate) map[int]api.NDSPlayerSlotCreate {
