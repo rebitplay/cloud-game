@@ -18,7 +18,8 @@ import (
 )
 
 type fakeNDSConnection struct {
-	id com.Uid
+	id        com.Uid
+	lastStart *api.StartGameRequest
 }
 
 func (f *fakeNDSConnection) Disconnect()        {}
@@ -36,6 +37,13 @@ func (f *fakeNDSConnection) Send(t api.PT, payload any) ([]byte, error) {
 		return json.Marshal(api.NDSRomInstallResponse{Game: "Tetris DS", Path: "nds/" + req.FileName})
 	case api.NDSSessionPrepare:
 		return json.Marshal(api.OK)
+	case api.StartGame:
+		req := payload.(api.StartGameRequest)
+		f.lastStart = &req
+		return json.Marshal(api.StartGameResponse{
+			Room:    api.Room{Rid: req.Rid},
+			Pointer: true,
+		})
 	default:
 		return json.Marshal(api.OK)
 	}
@@ -184,6 +192,35 @@ func TestAttachNDSUserTakesOverSeat(t *testing.T) {
 	}
 	if h.users.Find(oldUser.Id().String()) != nil {
 		t.Fatalf("old user still present after takeover")
+	}
+}
+
+func TestNDSGameStartIgnoresForgedClientFields(t *testing.T) {
+	conn := &fakeNDSConnection{id: com.NewUid()}
+	worker := &Worker{Connection: conn}
+	internalRoomID := "room-123-p2___Tetris DS"
+	if !worker.ReserveRoom(internalRoomID) {
+		t.Fatal("reserve worker")
+	}
+	seat := &ndsSeat{player: 2, ref: "user_2", roomID: internalRoomID, worker: worker}
+	user := &User{
+		Connection: &fakeNDSConnection{id: com.NewUid()},
+		nds:        &ndsUserSession{RoomID: "room-123", Player: 2, Ref: "user_2", Seat: seat},
+		log:        logger.NewConsole(false, "test", false),
+		w:          worker,
+	}
+
+	user.HandleStartGame(api.GameStartUserRequest{
+		GameName:    "Forged Game",
+		RoomId:      "other-room-p4___Other Game",
+		PlayerIndex: 4,
+	}, config.CoordinatorConfig{})
+
+	if conn.lastStart == nil {
+		t.Fatal("worker did not receive StartGame")
+	}
+	if conn.lastStart.Rid != internalRoomID || conn.lastStart.PlayerIndex != 2 || conn.lastStart.Game != "" {
+		t.Fatalf("start request used forged fields: %#v", conn.lastStart)
 	}
 }
 

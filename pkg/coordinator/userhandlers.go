@@ -53,6 +53,12 @@ func (u *User) HandleWebrtcSignal(rq api.WebrtcSignalUser) {
 }
 
 func (u *User) HandleStartGame(rq api.GameStartUserRequest, conf config.CoordinatorConfig) {
+	if u.nds != nil {
+		rq.RoomId = u.nds.Seat.roomID
+		rq.PlayerIndex = u.nds.Player
+		rq.GameName = ""
+	}
+
 	// Worker slot / room gating:
 	// - If the worker is BUSY (no free slot), we must not create another room.
 	//   * If the worker has already reported a room id, only allow requests
