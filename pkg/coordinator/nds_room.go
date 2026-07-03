@@ -27,26 +27,27 @@ type ndsRoomRegistry struct {
 }
 
 type ndsRoomSession struct {
-	mu           sync.Mutex
-	closedAt     *time.Time
-	createdAt    time.Time
-	idleTimeout  time.Duration
-	endpoint     string
-	game         string
-	groupID      string
-	idleTimer    *time.Timer
-	joinDeadline time.Time
-	joinTimer    *time.Timer
-	maxDuration  time.Duration
-	maxTimer     *time.Timer
-	players      map[int]*ndsSeat
-	reason       string
-	reserved     []reservedNDSWorker
-	roomID       string
-	romPath      string
-	startedAt    *time.Time
-	state        string
-	updatedAt    time.Time
+	mu             sync.Mutex
+	closedAt       *time.Time
+	closingStarted bool
+	createdAt      time.Time
+	idleTimeout    time.Duration
+	endpoint       string
+	game           string
+	groupID        string
+	idleTimer      *time.Timer
+	joinDeadline   time.Time
+	joinTimer      *time.Timer
+	maxDuration    time.Duration
+	maxTimer       *time.Timer
+	players        map[int]*ndsSeat
+	reason         string
+	reserved       []reservedNDSWorker
+	roomID         string
+	romPath        string
+	startedAt      *time.Time
+	state          string
+	updatedAt      time.Time
 }
 
 type ndsSeat struct {

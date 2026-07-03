@@ -291,10 +291,20 @@ func (h *Hub) handleNDSRoomGet(w http.ResponseWriter, roomID string) {
 }
 
 func (h *Hub) handleNDSRoomDelete(w http.ResponseWriter, roomID string) {
-	room := h.closeNDSRoom(roomID, ndsCloseHost)
+	room := h.ndsRooms.get(roomID)
 	if room == nil {
 		writeAPIError(w, http.StatusNotFound, "room_not_found", "room not found")
 		return
+	}
+	room.mu.Lock()
+	closed := room.state == ndsRoomClosed || room.state == ndsRoomFailed
+	room.mu.Unlock()
+	if closed {
+		writeAPIError(w, http.StatusNotFound, "room_not_found", "room not found")
+		return
+	}
+	if _, started := h.beginNDSRoomClose(roomID, ndsCloseHost); started {
+		go h.finishNDSRoomClose(room, ndsCloseHost)
 	}
 	writeAPIJSON(w, http.StatusAccepted, room.stateResponse())
 }

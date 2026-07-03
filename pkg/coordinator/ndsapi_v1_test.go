@@ -18,6 +18,7 @@ import (
 )
 
 type fakeNDSConnection struct {
+	flushBlock  <-chan struct{}
 	flushStatus *api.NDSSaveStatus
 	id          com.Uid
 	lastStart   *api.StartGameRequest
@@ -39,6 +40,9 @@ func (f *fakeNDSConnection) Send(t api.PT, payload any) ([]byte, error) {
 	case api.NDSSessionPrepare:
 		return json.Marshal(api.OK)
 	case api.NDSFlushSave:
+		if f.flushBlock != nil {
+			<-f.flushBlock
+		}
 		if f.flushStatus != nil {
 			return json.Marshal(f.flushStatus)
 		}
@@ -215,6 +219,54 @@ func TestNDSV1CreateRejectedWhileDraining(t *testing.T) {
 	if errResp.Code != "service_draining" || errResp.RetryAfterSec == 0 {
 		t.Fatalf("unexpected draining body: %#v", errResp)
 	}
+}
+
+func TestNDSV1DeleteReturnsAcceptedBeforeFlushCompletes(t *testing.T) {
+	h := testNDSHub(t, 0)
+	blockFlush := make(chan struct{})
+	internalRoomID := "room-123-p1___Tetris DS"
+	worker := &Worker{Connection: &fakeNDSConnection{id: com.NewUid(), flushBlock: blockFlush}}
+	h.ndsRooms.put(&ndsRoomSession{
+		createdAt: time.Now().UTC(),
+		players: map[int]*ndsSeat{
+			1: {player: 1, ref: "user_1", roomID: internalRoomID, saveStatus: "unchanged", worker: worker},
+		},
+		roomID:    "room-123",
+		state:     ndsRoomActive,
+		updatedAt: time.Now().UTC(),
+	})
+
+	rr := httptest.NewRecorder()
+	done := make(chan struct{})
+	go func() {
+		h.handleNDSRoomDelete(rr, "room-123")
+		close(done)
+	}()
+
+	select {
+	case <-done:
+	case <-time.After(100 * time.Millisecond):
+		close(blockFlush)
+		t.Fatal("DELETE blocked on final save flush")
+	}
+	if rr.Code != http.StatusAccepted {
+		close(blockFlush)
+		t.Fatalf("delete status = %d, want %d; body=%s", rr.Code, http.StatusAccepted, rr.Body.String())
+	}
+	if got := h.ndsRooms.get("room-123").state; got != ndsRoomClosing {
+		close(blockFlush)
+		t.Fatalf("room state after accepted delete = %s, want %s", got, ndsRoomClosing)
+	}
+
+	close(blockFlush)
+	deadline := time.Now().Add(time.Second)
+	for time.Now().Before(deadline) {
+		if h.ndsRooms.get("room-123").state == ndsRoomClosed {
+			return
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	t.Fatalf("room state = %s, want %s", h.ndsRooms.get("room-123").state, ndsRoomClosed)
 }
 
 func TestNDSWSRateLimitPerIP(t *testing.T) {

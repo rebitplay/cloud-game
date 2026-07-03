@@ -94,19 +94,40 @@ func (h *Hub) markNDSPlayerDisconnected(user *User) {
 }
 
 func (h *Hub) closeNDSRoom(roomID string, reason string) *ndsRoomSession {
+	room, started := h.beginNDSRoomClose(roomID, reason)
+	if room == nil || !started {
+		return room
+	}
+	return h.finishNDSRoomClose(room, reason)
+}
+
+func (h *Hub) beginNDSRoomClose(roomID string, reason string) (*ndsRoomSession, bool) {
 	room := h.ndsRooms.get(roomID)
+	if room == nil {
+		return nil, false
+	}
+	room.mu.Lock()
+	if room.state == ndsRoomClosed || room.state == ndsRoomFailed || room.closingStarted {
+		room.mu.Unlock()
+		return room, false
+	}
+	now := time.Now().UTC()
+	room.closingStarted = true
+	room.state = ndsRoomClosing
+	room.reason = reason
+	room.stopTimersLocked()
+	room.updatedAt = now
+	room.mu.Unlock()
+	h.writeNDSJournal()
+	return room, true
+}
+
+func (h *Hub) finishNDSRoomClose(room *ndsRoomSession, reason string) *ndsRoomSession {
 	if room == nil {
 		return nil
 	}
 	now := time.Now().UTC()
 	room.mu.Lock()
-	if room.state == ndsRoomClosed {
-		room.mu.Unlock()
-		return room
-	}
-	room.state = ndsRoomClosing
-	room.reason = reason
-	room.stopTimersLocked()
 	users := make([]*User, 0, len(room.players))
 	for _, seat := range room.players {
 		if seat.user != nil {
