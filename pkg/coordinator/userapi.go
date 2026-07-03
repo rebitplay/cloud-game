@@ -26,6 +26,14 @@ func (u *User) InitSession(wid string, ice []config.IceServer, games []api.AppMe
 	})
 }
 
+func (u *User) InitSessionAPI(wid string, ice []api.IceServer, games []api.AppMeta) {
+	u.Notify(api.InitSession, api.InitSessionUserResponse{
+		Ice:   ice,
+		Games: games,
+		Wid:   wid,
+	})
+}
+
 // SendWebrtcOffer sends SDP offer back to the user.
 func (u *User) SendWebrtcOffer(sdp string) {
 	u.Notify(api.WebrtcSignal, api.WebrtcSignalUser{Sdp: &sdp})

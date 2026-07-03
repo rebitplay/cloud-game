@@ -27,6 +27,7 @@ type ndsRoomRegistry struct {
 }
 
 type ndsRoomSession struct {
+	mu           sync.Mutex
 	closedAt     *time.Time
 	createdAt    time.Time
 	endpoint     string
@@ -52,7 +53,15 @@ type ndsSeat struct {
 	roomID        string
 	saveURL       string
 	saveUploadURL string
+	user          *User
 	worker        *Worker
+}
+
+type ndsUserSession struct {
+	Player int
+	Ref    string
+	RoomID string
+	Seat   *ndsSeat
 }
 
 func newNDSRoomRegistry() *ndsRoomRegistry {
@@ -95,6 +104,9 @@ func (r *ndsRoomRegistry) close(roomID string, now time.Time) *ndsRoomSession {
 }
 
 func (s *ndsRoomSession) response(ice []config.IceServer, now time.Time) (api.NDSRoomV1Response, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
 	players := make([]api.NDSPlayerJoinInfo, 0, len(s.players))
 	for _, seat := range s.sortedSeats() {
 		token, err := makeNDSSeatToken(s.roomID, seat.player, seat.ref, now)
@@ -120,6 +132,9 @@ func (s *ndsRoomSession) response(ice []config.IceServer, now time.Time) (api.ND
 }
 
 func (s *ndsRoomSession) tokenResponse(player int, ice []config.IceServer, now time.Time) (api.NDSPlayerJoinInfo, bool, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
 	seat := s.players[player]
 	if seat == nil {
 		return api.NDSPlayerJoinInfo{}, false, nil
@@ -138,6 +153,9 @@ func (s *ndsRoomSession) tokenResponse(player int, ice []config.IceServer, now t
 }
 
 func (s *ndsRoomSession) stateResponse() api.NDSRoomStateResponse {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
 	players := make([]api.NDSPlayerState, 0, len(s.players))
 	for _, seat := range s.sortedSeats() {
 		players = append(players, api.NDSPlayerState{

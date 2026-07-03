@@ -9,6 +9,7 @@ import (
 
 type User struct {
 	Connection
+	nds *ndsUserSession
 	w   *Worker // linked worker
 	log *logger.Logger
 }

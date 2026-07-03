@@ -73,6 +73,14 @@ func (h *Hub) handleUserConnection() http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		h.log.Debug().Msgf("Handshake %v", r.Host)
 
+		params := r.URL.Query()
+		ndsSession, err := h.resolveNDSUserSession(params)
+		if err != nil {
+			http.Error(w, "bad NDS token", http.StatusUnauthorized)
+			h.log.Warn().Err(err).Msg("NDS user authentication failed")
+			return
+		}
+
 		conn, err := connector.Connect(w, r)
 		if err != nil {
 			h.log.Error().Err(err).Msg("user connection fail")
@@ -80,31 +88,47 @@ func (h *Hub) handleUserConnection() http.HandlerFunc {
 		}
 
 		user := NewUser(conn, log)
-		defer h.users.RemoveDisconnect(user)
+		defer func() {
+			h.detachNDSUser(user)
+			h.users.RemoveDisconnect(user)
+		}()
 		done := user.HandleRequests(h, h.conf)
-		params := r.URL.Query()
 
-		worker := h.findWorkerFor(user, params, h.log.Extend(h.log.With().Str("cid", user.Id().Short())))
-		if worker == nil {
-			user.Notify(api.ErrNoFreeSlots, "")
-			h.log.Info().Msg("no free workers")
-			return
+		if ndsSession != nil {
+			user.nds = ndsSession
+			user.w = ndsSession.Seat.worker
+			h.attachNDSUser(user)
+		} else {
+			worker := h.findWorkerFor(user, params, h.log.Extend(h.log.With().Str("cid", user.Id().Short())))
+			if worker == nil {
+				user.Notify(api.ErrNoFreeSlots, "")
+				h.log.Info().Msg("no free workers")
+				return
+			}
+
+			// Link the user to the selected worker. Slot reservation is handled later
+			// on game start; this keeps connections lightweight and lets deep-link
+			// joins share a worker without consuming its single game slot.
+			user.w = worker
 		}
-
-		// Link the user to the selected worker. Slot reservation is handled later
-		// on game start; this keeps connections lightweight and lets deep-link
-		// joins share a worker without consuming its single game slot.
-		user.w = worker
 
 		h.users.Add(user)
 
-		apps := worker.AppNames()
+		apps := user.w.AppNames()
 		list := make([]api.AppMeta, len(apps))
-		for i := range apps {
-			list[i] = api.AppMeta{Alias: apps[i].Alias, Title: apps[i].Name, System: apps[i].System}
+		if user.nds != nil {
+			list = nil
+		} else {
+			for i := range apps {
+				list[i] = api.AppMeta{Alias: apps[i].Alias, Title: apps[i].Name, System: apps[i].System}
+			}
 		}
 
-		user.InitSession(worker.Id().String(), h.conf.Webrtc.IceServers, list)
+		if user.nds != nil {
+			user.InitSessionAPI(user.w.Id().String(), ndsIceServers(h.conf.Webrtc.IceServers, user.nds.RoomID, user.nds.Player), list)
+		} else {
+			user.InitSession(user.w.Id().String(), h.conf.Webrtc.IceServers, list)
+		}
 		log.Info().Str(logger.DirectionField, logger.MarkPlus).Msgf("user %s", user.Id())
 		<-done
 	}

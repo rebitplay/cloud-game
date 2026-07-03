@@ -91,6 +91,49 @@ func makeNDSSeatToken(roomID string, player int, ref string, now time.Time) (str
 	return unsigned + "." + base64.RawURLEncoding.EncodeToString(sig), nil
 }
 
+func validateNDSSeatToken(token string, now time.Time) (ndsTokenClaims, error) {
+	secret := strings.TrimSpace(os.Getenv("NDS_TOKEN_SECRET"))
+	if secret == "" {
+		return ndsTokenClaims{}, fmt.Errorf("NDS_TOKEN_SECRET is not configured")
+	}
+	parts := strings.Split(token, ".")
+	if len(parts) != 3 {
+		return ndsTokenClaims{}, fmt.Errorf("malformed token")
+	}
+	unsigned := parts[0] + "." + parts[1]
+	expect := hmacSHA256([]byte(secret), []byte(unsigned))
+	got, err := base64.RawURLEncoding.DecodeString(parts[2])
+	if err != nil {
+		return ndsTokenClaims{}, fmt.Errorf("malformed token signature")
+	}
+	if subtle.ConstantTimeCompare(got, expect) != 1 {
+		return ndsTokenClaims{}, fmt.Errorf("invalid token signature")
+	}
+	var header struct {
+		Alg string `json:"alg"`
+		Typ string `json:"typ"`
+	}
+	headerBytes, err := base64.RawURLEncoding.DecodeString(parts[0])
+	if err != nil || json.Unmarshal(headerBytes, &header) != nil || header.Alg != "HS256" {
+		return ndsTokenClaims{}, fmt.Errorf("invalid token header")
+	}
+	body, err := base64.RawURLEncoding.DecodeString(parts[1])
+	if err != nil {
+		return ndsTokenClaims{}, fmt.Errorf("malformed token claims")
+	}
+	var claims ndsTokenClaims
+	if err := json.Unmarshal(body, &claims); err != nil {
+		return ndsTokenClaims{}, fmt.Errorf("malformed token claims")
+	}
+	if claims.RID == "" || claims.P < 1 || claims.P > 4 || claims.Ref == "" || claims.JTI == "" {
+		return ndsTokenClaims{}, fmt.Errorf("invalid token claims")
+	}
+	if now.Unix() > claims.Exp {
+		return ndsTokenClaims{}, fmt.Errorf("token expired")
+	}
+	return claims, nil
+}
+
 func hmacSHA256(secret []byte, data []byte) []byte {
 	mac := hmac.New(sha256.New, secret)
 	_, _ = mac.Write(data)

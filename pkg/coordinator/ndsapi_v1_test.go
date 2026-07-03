@@ -5,9 +5,11 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"strconv"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/giongto35/cloud-game/v3/pkg/api"
 	"github.com/giongto35/cloud-game/v3/pkg/com"
@@ -125,6 +127,63 @@ func TestNDSV1CreateValidationAndCapacityErrors(t *testing.T) {
 	}
 	if errResp.Code != "no_capacity" || errResp.RetryAfterSec == 0 {
 		t.Fatalf("unexpected no_capacity body: %#v", errResp)
+	}
+}
+
+func TestNDSSeatTokenValidation(t *testing.T) {
+	t.Setenv("NDS_TOKEN_SECRET", "token-secret")
+	now := time.Now().UTC()
+	token, err := makeNDSSeatToken("room-123", 2, "user_2", now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	claims, err := validateNDSSeatToken(token, now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if claims.RID != "room-123" || claims.P != 2 || claims.Ref != "user_2" {
+		t.Fatalf("unexpected claims: %#v", claims)
+	}
+	if _, err := validateNDSSeatToken(token, now.Add(ndsTokenTTL+time.Second)); err == nil {
+		t.Fatal("expired token validated successfully")
+	}
+}
+
+func TestResolveNDSUserSessionRejectsLegacyJoinForV1Room(t *testing.T) {
+	h := testNDSHub(t, 1)
+	h.ndsRooms.put(&ndsRoomSession{
+		roomID: "room-123",
+		state:  ndsRoomReady,
+		players: map[int]*ndsSeat{
+			1: {player: 1, ref: "user_1"},
+		},
+	})
+
+	if session, err := h.resolveNDSUserSession(url.Values{api.RoomIdQueryParam: []string{"room-123-p1___Tetris DS"}}); err == nil || session != nil {
+		t.Fatalf("legacy join resolved session=%#v err=%v, want token-required error", session, err)
+	}
+}
+
+func TestAttachNDSUserTakesOverSeat(t *testing.T) {
+	h := testNDSHub(t, 0)
+	seat := &ndsSeat{player: 1, ref: "user_1"}
+	h.ndsRooms.put(&ndsRoomSession{
+		roomID:  "room-123",
+		state:   ndsRoomReady,
+		players: map[int]*ndsSeat{1: seat},
+	})
+
+	oldUser := &User{Connection: &fakeNDSConnection{id: com.NewUid()}, nds: &ndsUserSession{RoomID: "room-123", Player: 1, Ref: "user_1", Seat: seat}}
+	newUser := &User{Connection: &fakeNDSConnection{id: com.NewUid()}, nds: &ndsUserSession{RoomID: "room-123", Player: 1, Ref: "user_1", Seat: seat}}
+	h.attachNDSUser(oldUser)
+	h.users.Add(oldUser)
+	h.attachNDSUser(newUser)
+
+	if seat.user != newUser || !seat.connected {
+		t.Fatalf("seat was not taken over by new user")
+	}
+	if h.users.Find(oldUser.Id().String()) != nil {
+		t.Fatalf("old user still present after takeover")
 	}
 }
 
