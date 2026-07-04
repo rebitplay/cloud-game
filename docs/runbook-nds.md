@@ -5,7 +5,7 @@
 Use the latest pushed image digest from the release you intend to test. Do not deploy a floating tag unless the platform records the resolved digest.
 
 ```text
-ghcr.io/rebitplay/cloud-game@sha256:28bace7dfb9fd43076677e36adb49e85a976b6f6e4426c20996a125ef83eb9eb
+ghcr.io/rebitplay/cloud-game@sha256:722c910288f66fce7a4e6a69b64e87e9cfe2019640af18253afb33f5f1f9af94
 ```
 
 Equivalent pushed tags are only for discovery; the Bunny deployment should be pinned to the digest that serves the expected `/buildz` version and WebRTC asset.
@@ -63,7 +63,7 @@ Then run the authenticated verifier:
 ```bash
 NDS_ENDPOINT=http://109.224.230.118:8000 \
 NDS_API_KEY="$NDS_API_KEY" \
-NDS_EXPECT_VERSION=b1d1cb06-m4-fps-20260704012020 \
+NDS_EXPECT_VERSION=8cb0470e-m4-fps-20260704042317 \
 NDS_EXPECT_PUBLIC_IP=109.224.230.118 \
 NDS_EXPECT_PUBLIC_PORT=8641 \
 NDS_REQUIRE_TURN=true \
