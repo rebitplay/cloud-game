@@ -151,7 +151,7 @@ func (h *Hub) handleUserConnection() http.HandlerFunc {
 		}
 
 		if user.nds != nil {
-			user.InitSessionAPI(user.w.Id().String(), ndsIceServers(h.conf.Webrtc.IceServers, user.nds.RoomID, user.nds.Player), list)
+			user.InitSessionAPI(user.w.Id().String(), ndsIceServers(h.conf.Webrtc.IceServers, user.nds.RoomID, user.nds.Player, user.nds.ExpiresAt), list)
 		} else {
 			user.InitSession(user.w.Id().String(), h.conf.Webrtc.IceServers, list)
 		}

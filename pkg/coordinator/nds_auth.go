@@ -16,7 +16,10 @@ import (
 	"github.com/rs/xid"
 )
 
-const ndsTokenTTL = 10 * time.Minute
+const (
+	ndsTokenTTL          = 10 * time.Minute
+	ndsTokenRefreshGrace = 5 * time.Minute
+)
 
 type ndsTokenClaims struct {
 	Exp int64  `json:"exp"`
@@ -77,16 +80,19 @@ func constantTimeStringEqual(a string, b string) bool {
 	return subtle.ConstantTimeCompare(ah[:], bh[:]) == 1
 }
 
-func makeNDSSeatToken(roomID string, player int, ref string, now time.Time) (string, error) {
+func makeNDSSeatToken(roomID string, player int, ref string, now time.Time, expiresAt time.Time) (string, error) {
 	secret := strings.TrimSpace(os.Getenv("NDS_TOKEN_SECRET"))
 	if secret == "" {
 		return "", fmt.Errorf("NDS_TOKEN_SECRET is not configured")
+	}
+	if expiresAt.IsZero() || !expiresAt.After(now) {
+		expiresAt = now.Add(ndsTokenTTL)
 	}
 	claims := ndsTokenClaims{
 		RID: roomID,
 		P:   player,
 		Ref: ref,
-		Exp: now.Add(ndsTokenTTL).Unix(),
+		Exp: expiresAt.Unix(),
 		JTI: xid.New().String(),
 	}
 	header, err := json.Marshal(map[string]string{"alg": "HS256", "typ": "JWT"})

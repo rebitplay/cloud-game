@@ -351,6 +351,54 @@ func TestNDSV1CreateIsIdempotentAndUsesPublicEndpoint(t *testing.T) {
 	}
 }
 
+func TestNDSV1CreateTokensCoverRoomDuration(t *testing.T) {
+	t.Setenv("NDS_API_KEY", "test-key")
+	t.Setenv("NDS_TOKEN_SECRET", "token-secret")
+	t.Setenv("NDS_PUBLIC_ENDPOINT", "https://sg-1.nds.rebitplay.com")
+	t.Setenv("NDS_TURN_URLS", "turn:turn.example.com:3478?transport=udp")
+	t.Setenv("NDS_TURN_SECRET", "turn-secret")
+
+	h := testNDSHub(t, 1)
+	req := api.NDSRoomCreateRequest{}
+	if err := json.Unmarshal(testNDSCreateBody("room-duration-token", 2), &req); err != nil {
+		t.Fatal(err)
+	}
+	req.Options.MaxDurationSec = 1800
+	body, err := json.Marshal(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	startedAt := time.Now().UTC()
+	created := postNDSRoom(t, h, body)
+	if created.Code != http.StatusCreated {
+		t.Fatalf("create status = %d, want %d; body=%s", created.Code, http.StatusCreated, created.Body.String())
+	}
+	var resp api.NDSRoomV1Response
+	if err := json.Unmarshal(created.Body.Bytes(), &resp); err != nil {
+		t.Fatal(err)
+	}
+	if len(resp.Players) == 0 {
+		t.Fatal("create returned no players")
+	}
+	if _, err := validateNDSSeatToken(resp.Players[0].Token, startedAt.Add(ndsTokenTTL+time.Minute)); err != nil {
+		t.Fatalf("room token should outlive fixed 10-minute TTL for long rooms: %v", err)
+	}
+	if _, err := validateNDSSeatToken(resp.Players[0].Token, startedAt.Add(35*time.Minute)); err != nil {
+		t.Fatalf("room token should cover requested max duration plus join window: %v", err)
+	}
+	if len(resp.Players[0].IceServers) == 0 || resp.Players[0].IceServers[0].Username == "" {
+		t.Fatalf("TURN credentials missing from player response: %#v", resp.Players[0].IceServers)
+	}
+	turnExpiry, err := strconv.ParseInt(strings.Split(resp.Players[0].IceServers[0].Username, ":")[0], 10, 64)
+	if err != nil {
+		t.Fatalf("TURN username does not start with expiry: %q", resp.Players[0].IceServers[0].Username)
+	}
+	if time.Unix(turnExpiry, 0).Before(startedAt.Add(35 * time.Minute)) {
+		t.Fatalf("TURN credential expires too early: %s", time.Unix(turnExpiry, 0))
+	}
+}
+
 func TestNDSV1CreateValidationAndCapacityErrors(t *testing.T) {
 	t.Setenv("NDS_API_KEY", "test-key")
 	t.Setenv("NDS_TOKEN_SECRET", "token-secret")
@@ -721,7 +769,7 @@ func TestNDSWSRateLimitPerIP(t *testing.T) {
 func TestNDSSeatTokenValidation(t *testing.T) {
 	t.Setenv("NDS_TOKEN_SECRET", "token-secret")
 	now := time.Now().UTC()
-	token, err := makeNDSSeatToken("room-123", 2, "user_2", now)
+	token, err := makeNDSSeatToken("room-123", 2, "user_2", now, time.Time{})
 	if err != nil {
 		t.Fatal(err)
 	}

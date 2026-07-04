@@ -70,10 +70,11 @@ type ndsSeat struct {
 }
 
 type ndsUserSession struct {
-	Player int
-	Ref    string
-	RoomID string
-	Seat   *ndsSeat
+	Player    int
+	Ref       string
+	RoomID    string
+	Seat      *ndsSeat
+	ExpiresAt time.Time
 }
 
 func newNDSRoomRegistry() *ndsRoomRegistry {
@@ -120,13 +121,14 @@ func (s *ndsRoomSession) response(ice []config.IceServer, now time.Time) (api.ND
 	defer s.mu.Unlock()
 
 	players := make([]api.NDSPlayerJoinInfo, 0, len(s.players))
+	expiresAt := s.tokenExpiresAtLocked(now)
 	for _, seat := range s.sortedSeats() {
-		token, err := makeNDSSeatToken(s.roomID, seat.player, seat.ref, now)
+		token, err := makeNDSSeatToken(s.roomID, seat.player, seat.ref, now, expiresAt)
 		if err != nil {
 			return api.NDSRoomV1Response{}, err
 		}
 		players = append(players, api.NDSPlayerJoinInfo{
-			IceServers:   ndsIceServers(ice, s.roomID, seat.player),
+			IceServers:   ndsIceServers(ice, s.roomID, seat.player, expiresAt),
 			Player:       seat.player,
 			Ref:          seat.ref,
 			SignalingURL: ndsSignalingURL(s.endpoint, token),
@@ -151,17 +153,34 @@ func (s *ndsRoomSession) tokenResponse(player int, ice []config.IceServer, now t
 	if seat == nil {
 		return api.NDSPlayerJoinInfo{}, false, nil
 	}
-	token, err := makeNDSSeatToken(s.roomID, seat.player, seat.ref, now)
+	expiresAt := s.tokenExpiresAtLocked(now)
+	token, err := makeNDSSeatToken(s.roomID, seat.player, seat.ref, now, expiresAt)
 	if err != nil {
 		return api.NDSPlayerJoinInfo{}, true, err
 	}
 	return api.NDSPlayerJoinInfo{
-		IceServers:   ndsIceServers(ice, s.roomID, seat.player),
+		IceServers:   ndsIceServers(ice, s.roomID, seat.player, expiresAt),
 		Player:       seat.player,
 		Ref:          seat.ref,
 		SignalingURL: ndsSignalingURL(s.endpoint, token),
 		Token:        token,
 	}, true, nil
+}
+
+func (s *ndsRoomSession) tokenExpiresAtLocked(now time.Time) time.Time {
+	expiresAt := now.Add(ndsTokenTTL)
+	if s.maxDuration > 0 {
+		var roomEnd time.Time
+		if s.startedAt != nil {
+			roomEnd = s.startedAt.Add(s.maxDuration)
+		} else {
+			roomEnd = s.joinDeadline.Add(s.maxDuration)
+		}
+		if roomEnd.After(expiresAt) {
+			expiresAt = roomEnd
+		}
+	}
+	return expiresAt.Add(ndsTokenRefreshGrace)
 }
 
 func (s *ndsRoomSession) stateResponse() api.NDSRoomStateResponse {
@@ -247,7 +266,7 @@ func ndsSignalingURL(endpoint string, token string) string {
 	return u.String()
 }
 
-func ndsIceServers(base []config.IceServer, roomID string, player int) []api.IceServer {
+func ndsIceServers(base []config.IceServer, roomID string, player int, expiresAt time.Time) []api.IceServer {
 	servers := make([]api.IceServer, 0, len(base)+2)
 	for _, server := range base {
 		servers = append(servers, api.IceServer{
@@ -262,7 +281,11 @@ func ndsIceServers(base []config.IceServer, roomID string, player int) []api.Ice
 	if urls == "" || secret == "" {
 		return servers
 	}
-	username := strconv.FormatInt(time.Now().Add(ndsTokenTTL).Unix(), 10) + ":" + roomID + ":" + strconv.Itoa(player)
+	now := time.Now()
+	if expiresAt.IsZero() || !expiresAt.After(now) {
+		expiresAt = now.Add(ndsTokenTTL)
+	}
+	username := strconv.FormatInt(expiresAt.Unix(), 10) + ":" + roomID + ":" + strconv.Itoa(player)
 	credential := base64HMACSHA1(secret, username)
 	for _, raw := range strings.Split(urls, ",") {
 		url := strings.TrimSpace(raw)

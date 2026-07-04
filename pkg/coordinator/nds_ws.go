@@ -37,7 +37,7 @@ func (h *Hub) resolveNDSUserSession(q url.Values) (*ndsUserSession, error) {
 		monitoring.IncNDSTokenFailure("seat_not_found")
 		return nil, fmt.Errorf("seat not found")
 	}
-	return &ndsUserSession{RoomID: claims.RID, Player: claims.P, Ref: claims.Ref, Seat: seat}, nil
+	return &ndsUserSession{RoomID: claims.RID, Player: claims.P, Ref: claims.Ref, Seat: seat, ExpiresAt: time.Unix(claims.Exp, 0)}, nil
 }
 
 func (h *Hub) attachNDSUser(user *User) {
