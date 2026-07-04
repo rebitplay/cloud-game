@@ -191,6 +191,14 @@ NDS_PLAYERS=4 \
 NDS_DURATION_SEC=1800 \
 NDS_JOIN_P95_MAX_MS=10000 \
 NDS_RTT_P95_MAX_MS=200 \
+NDS_VIDEO_LATENCY_P50_MAX_MS=120 \
+NDS_VIDEO_LATENCY_P95_MAX_MS=200 \
+NDS_CAPTURE_LATENCY_P50_MAX_MS=120 \
+NDS_CAPTURE_LATENCY_P95_MAX_MS=200 \
+NDS_INPUT_FRAME_P50_MAX_MS=100 \
+NDS_REQUIRE_VIDEO_LATENCY=true \
+NDS_REQUIRE_CAPTURE_LATENCY=false \
+NDS_REQUIRE_INPUT_FRAME_LATENCY=true \
 NDS_METRICS_URL=http://109.224.230.118:8000/metrics \
 NDS_CLOSE_SETTLE_MS=10000 \
 NDS_SAVE_UPLOAD_FAILURE_MAX=0 \
@@ -215,18 +223,21 @@ NDS_ROM_SHA1=13eb2e7e5357a6e31f94ea238826c111c965bc9b
 
 Do not use a templated Laravel signed URL such as `/sessions/{room}/players/{player}/save?...` unless each final room/player URL was signed after substitution; changing path parameters after signing invalidates the signature.
 
-The script preflights `/healthz`, authenticated `/buildz`, and authenticated `/v1/capacity`, then prints JSON with health/build/capacity snapshots, join-time, RTT, FPS, final inbound video stats, SDK state events, save-upload sink results, active/before/after metrics snapshots, metrics deltas, and threshold results. It fails before opening browsers when the deployed build is stale, Firefox/TURN prerequisites are missing, or `by_players[NDS_PLAYERS]`/`total_rooms` is below `NDS_ROOMS`. By default it also fails when capacity or connected-seat metrics do not recover after cleanup; set `NDS_REQUIRE_CAPACITY_RECOVERY=false` and `NDS_REQUIRE_METRICS_RECOVERY=false` only for shared-container smoke tests. When `NDS_METRICS_URL` is set it checks that active rooms/seats appear during the run, worker video frames increase, waits `NDS_CLOSE_SETTLE_MS` after cleanup, scrapes metrics with `Authorization: Bearer $NDS_API_KEY`, then fails the run if save-upload failures or webhook retries increase beyond the configured max values. Set `NDS_REQUIRE_NETPACKET_METRICS=true` for a multiplayer-flow proof where the ROM is expected to generate melonDS LAN packet counters. For M4 acceptance, run it on the target 16-vCPU Bunny container for 30 minutes and compare:
+The script preflights `/healthz`, authenticated `/buildz`, and authenticated `/v1/capacity`, then prints JSON with health/build/capacity snapshots, join-time, RTT, FPS, browser video latency, input-to-next-frame timing, final inbound video stats, SDK state events, save-upload sink results, active/before/after metrics snapshots, metrics deltas, and threshold results. It fails before opening browsers when the deployed build is stale, Firefox/TURN prerequisites are missing, or `by_players[NDS_PLAYERS]`/`total_rooms` is below `NDS_ROOMS`. By default it also fails when capacity or connected-seat metrics do not recover after cleanup; set `NDS_REQUIRE_CAPACITY_RECOVERY=false` and `NDS_REQUIRE_METRICS_RECOVERY=false` only for shared-container smoke tests. When `NDS_METRICS_URL` is set it checks that active rooms/seats appear during the run, worker video frames increase, waits `NDS_CLOSE_SETTLE_MS` after cleanup, scrapes metrics with `Authorization: Bearer $NDS_API_KEY`, then fails the run if save-upload failures or webhook retries increase beyond the configured max values. Set `NDS_REQUIRE_NETPACKET_METRICS=true` for a multiplayer-flow proof where the ROM is expected to generate melonDS LAN packet counters. For M4 acceptance, run it on the target 16-vCPU Bunny container for 30 minutes and compare:
 
 ```text
 Join time p95 <= 10s with cached ROM
-Same-region RTT should stay comfortably below the NR-1 latency budget
+Browser receive-to-display p50/p95 <= 120/200ms
+Browser capture-to-display p50/p95 <= 120/200ms when requestVideoFrameCallback exposes captureTime and `NDS_REQUIRE_CAPTURE_LATENCY=true`
+Input dispatch to next presented frame p50 <= 100ms
+Same-region RTT should stay comfortably below the video latency budget
 2 concurrent 4-player rooms stay connected for the full run
 No save upload failures or webhook retry spikes
 Worker video FPS stays positive while rooms are active
 Worker video frame metrics increase while rooms are active
 ```
 
-Glass-to-glass and input-to-photon still need an external visual timing rig or browser instrumentation beyond WebRTC RTT; do not claim NR-1 is fully proven from RTT alone.
+The automated browser latency values come from `requestVideoFrameCallback`: receive-to-display is `expectedDisplayTime - receiveTime`; capture-to-display is `expectedDisplayTime - captureTime` only when the browser exposes `captureTime`; input timing is client input dispatch to the next presented video frame. This is stronger than WebRTC RTT and is suitable for automated regression gating, but a strict physical input-to-photon claim still needs a visual timing rig or a purpose-built latency ROM that changes pixels in response to the probe input.
 
 `cloud-game/scripts/nds-load-test.mjs` is kept as a direct protocol smoke harness for service debugging, but it should not be used as the final M4 SDK proof.
 
