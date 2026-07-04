@@ -121,6 +121,7 @@ func TestNDSV1RoutesRequireAuth(t *testing.T) {
 		path   string
 	}{
 		{http.MethodGet, "/v1/capacity"},
+		{http.MethodGet, "/v1/time"},
 		{http.MethodPost, "/v1/rooms"},
 		{http.MethodGet, "/v1/rooms/room-123"},
 		{http.MethodDelete, "/v1/rooms/room-123"},
@@ -131,6 +132,31 @@ func TestNDSV1RoutesRequireAuth(t *testing.T) {
 		if rec.Code != http.StatusUnauthorized {
 			t.Fatalf("%s %s without auth status = %d, want %d; body=%s", tc.method, tc.path, rec.Code, http.StatusUnauthorized, rec.Body.String())
 		}
+	}
+}
+
+func TestNDSV1TimeRoute(t *testing.T) {
+	t.Setenv("NDS_API_KEY", "test-key")
+	conf := config.CoordinatorConfig{}
+	coordinator := &Coordinator{hub: NewHub(conf, logger.NewConsole(false, "test", false))}
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/v1/time", nil)
+	req.Header.Set("Authorization", "Bearer test-key")
+	coordinator.registerRoutes(conf, httpx.NewServeMux("")).ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("time status = %d, want %d; body=%s", rec.Code, http.StatusOK, rec.Body.String())
+	}
+
+	var resp ndsTimeResponse
+	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
+		t.Fatal(err)
+	}
+	if resp.UnixMs <= 0 || resp.UnixNs <= 0 || resp.RFC3339Nano == "" {
+		t.Fatalf("invalid time response: %#v", resp)
+	}
+	if delta := resp.UnixNs/1_000_000 - resp.UnixMs; delta < -1 || delta > 1 {
+		t.Fatalf("unix_ns and unix_ms disagree: %#v", resp)
 	}
 }
 
@@ -240,6 +266,7 @@ func TestCoordinatorBuildzRouteReportsFrontendAndEnv(t *testing.T) {
 	t.Setenv("WEBRTC_PUBLIC_IP", "109.224.230.118")
 	t.Setenv("WEBRTC_PUBLIC_PORT", "8641")
 	t.Setenv("NDS_PUBLIC_METRICS", "true")
+	t.Setenv("NDS_LATENCY_WATERMARK_ENABLED", "true")
 	BuildVersion = "test-version"
 	t.Cleanup(func() { BuildVersion = "?" })
 
@@ -267,7 +294,7 @@ func TestCoordinatorBuildzRouteReportsFrontendAndEnv(t *testing.T) {
 	if !resp.WebRTCFirefoxRelayPolicy {
 		t.Fatalf("Firefox relay policy not detected; body=%s", rec.Body.String())
 	}
-	if !resp.NDSRestTURNConfigured || !resp.WebRTCMuxEnabled || !resp.MetricsEnabled {
+	if !resp.NDSRestTURNConfigured || !resp.WebRTCMuxEnabled || !resp.MetricsEnabled || !resp.NDSLatencyWatermark {
 		t.Fatalf("expected deploy flags missing; body=%s", rec.Body.String())
 	}
 	if resp.WebRTCPublicIP != "109.224.230.118" || resp.WebRTCPublicPort != "8641" {

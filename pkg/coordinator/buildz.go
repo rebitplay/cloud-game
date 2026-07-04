@@ -26,6 +26,7 @@ type buildzResponse struct {
 	WebRTCPublicIP           string `json:"webrtc_public_ip,omitempty"`
 	WebRTCPublicPort         string `json:"webrtc_public_port,omitempty"`
 	MetricsEnabled           bool   `json:"metrics_enabled"`
+	NDSLatencyWatermark      bool   `json:"nds_latency_watermark_enabled"`
 	AssetError               string `json:"asset_error,omitempty"`
 }
 
@@ -48,6 +49,8 @@ func handleBuildz(conf config.CoordinatorConfig) http.HandlerFunc {
 			WebRTCPublicIP:   firstNonEmptyEnv("WEBRTC_PUBLIC_IP", "BUNNY_ANYCAST_IP"),
 			WebRTCPublicPort: firstNonEmptyEnv("WEBRTC_PUBLIC_PORT"),
 			MetricsEnabled:   coordinatorPublicMetricsEnabled(conf),
+			NDSLatencyWatermark: envBool("NDS_LATENCY_WATERMARK_ENABLED", false) ||
+				envBool("CLOUD_GAME_NDS_LATENCY_WATERMARK_ENABLED", false),
 		}
 		if assetErr != nil {
 			resp.AssetError = assetErr.Error()

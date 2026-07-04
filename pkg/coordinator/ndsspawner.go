@@ -260,6 +260,8 @@ func (s *ndsSpawner) startWorker(groupID string, player int) (*exec.Cmd, error) 
 		"CLOUD_GAME_WORKER_NDS_GROUP":                groupID,
 		"CLOUD_GAME_WORKER_NDS_PLAYER":               strconv.Itoa(player),
 		"CLOUD_GAME_ENCODER_VIDEO_CODEC":             s.videoCodec,
+		"NDS_LATENCY_WATERMARK_ENABLED":              envString("NDS_LATENCY_WATERMARK_ENABLED", envString("CLOUD_GAME_NDS_LATENCY_WATERMARK_ENABLED", "false")),
+		"CLOUD_GAME_NDS_LATENCY_WATERMARK_ENABLED":   envString("CLOUD_GAME_NDS_LATENCY_WATERMARK_ENABLED", envString("NDS_LATENCY_WATERMARK_ENABLED", "false")),
 		"CLOUD_GAME_WEBRTC_ICELITE":                  s.workerIceLite,
 		"CLOUD_GAME_WEBRTC_SINGLEPORT":               strconv.Itoa(webrtcPort),
 		"CLOUD_GAME_WEBRTC_INCLUDELOOPBACKCANDIDATE": s.includeLoopback,

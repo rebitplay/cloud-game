@@ -62,6 +62,12 @@ type ndsDemoRoomCreateRequest struct {
 	VideoCode string                     `json:"video_codec,omitempty"`
 }
 
+type ndsTimeResponse struct {
+	RFC3339Nano string `json:"rfc3339_nano"`
+	UnixMs      int64  `json:"unix_ms"`
+	UnixNs      int64  `json:"unix_ns"`
+}
+
 func (h *Hub) handleHealthz() http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodGet {
@@ -69,6 +75,21 @@ func (h *Hub) handleHealthz() http.HandlerFunc {
 			return
 		}
 		w.WriteHeader(http.StatusNoContent)
+	}
+}
+
+func (h *Hub) handleNDSTime() http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet {
+			writeAPIError(w, http.StatusMethodNotAllowed, "method_not_allowed", "method not allowed")
+			return
+		}
+		now := time.Now().UTC()
+		writeAPIJSON(w, http.StatusOK, ndsTimeResponse{
+			RFC3339Nano: now.Format(time.RFC3339Nano),
+			UnixMs:      now.UnixMilli(),
+			UnixNs:      now.UnixNano(),
+		})
 	}
 }
 

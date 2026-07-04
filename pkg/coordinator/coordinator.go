@@ -47,6 +47,7 @@ func (c *Coordinator) registerRoutes(conf config.CoordinatorConfig, mux *httpx.M
 		mux.HandleFunc("/metrics", c.hub.requireNDSAPIKey(c.hub.handleCoordinatorMetrics()))
 	}
 	mux.HandleFunc("/v1/capacity", c.hub.requireNDSAPIKey(c.hub.handleNDSCapacity()))
+	mux.HandleFunc("/v1/time", c.hub.requireNDSAPIKey(c.hub.handleNDSTime()))
 	mux.HandleFunc("/v1/rooms", c.hub.requireNDSAPIKey(c.hub.handleNDSRooms()))
 	mux.HandleFunc("/v1/rooms/", c.hub.requireNDSAPIKey(c.hub.handleNDSRoomByID()))
 	mux.HandleFunc("/ws", c.hub.handleUserConnection())

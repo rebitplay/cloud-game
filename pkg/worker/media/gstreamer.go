@@ -368,6 +368,9 @@ func (g *GstMediaPipe) ProcessVideo(v Video, cb func([]byte, time.Duration)) {
 	stride := v.Frame.Stride
 
 	data := v.Frame.Data[:stride*h]
+	if ndsLatencyWatermarkEnabled() {
+		data = cloneWithNDSTimestampWatermark(data, w, h, stride, g.pixFmt, time.Now())
+	}
 	if stride == w*g.bpp {
 		stride = 0
 	}

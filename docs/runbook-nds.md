@@ -5,7 +5,7 @@
 Use the latest pushed image digest from the release you intend to test. Do not deploy a floating tag unless the platform records the resolved digest.
 
 ```text
-ghcr.io/rebitplay/cloud-game@sha256:1f74da32b7666db4f98de0de9d38ce422790261164a7ac850e0f9a24ecc2a553
+ghcr.io/rebitplay/cloud-game@sha256:50b31cd710b8cbb4218ffe45d8bc659841d4d3f34d887752e3b9424b740a150c
 ```
 
 Equivalent pushed tags are only for discovery; the Bunny deployment should be pinned to the digest that serves the expected `/buildz` version and WebRTC asset.
@@ -40,6 +40,14 @@ NDS_TURN_URLS=turn:<turn-host>:3478?transport=udp,turn:<turn-host>:3478?transpor
 NDS_TURN_SECRET=<turn-rest-secret>
 ```
 
+For M4 latency proof runs, temporarily add:
+
+```text
+NDS_LATENCY_WATERMARK_ENABLED=true
+```
+
+This draws a proof-only timestamp block into the top-left of worker video frames so the headless load harness can measure capture-to-display from presented pixels. Leave it disabled for normal player-facing deployments unless you are actively collecting latency evidence.
+
 Firefox is the browser most likely to expose ICE ordering or TURN problems. Confirm the served frontend uses `web/js/network/webrtc.js?v=10` or newer if using the built-in demo pages. Firefox should be treated as TURN-required on Bunny; Chrome/Edge can use the public UDP mux directly. `CLOUD_GAME_COORDINATOR_ORIGIN_USERWS=*` is required when the player UI is served by Rebit or another host; room tokens still authenticate the user signaling WebSocket.
 
 Firefox failure is not a wait-time issue once the console reports `WebRTC: ICE failed`. If `/buildz` reports `nds_rest_turn_configured:false` and `config_turn_count:0`, Firefox is expected to fail on Bunny even when Chrome works. Add TURN env, redeploy, then retest after `/buildz` changes to `nds_rest_turn_configured:true` or `config_turn_count` is non-zero.
@@ -63,7 +71,7 @@ Then run the authenticated verifier:
 ```bash
 NDS_ENDPOINT=http://109.224.230.118:8000 \
 NDS_API_KEY="$NDS_API_KEY" \
-NDS_EXPECT_VERSION=4cbba21d-m4-save-20260704084447 \
+NDS_EXPECT_VERSION=82c04b2d-token-20260704094313 \
 NDS_EXPECT_PUBLIC_IP=109.224.230.118 \
 NDS_EXPECT_PUBLIC_PORT=8641 \
 NDS_REQUIRE_TURN=true \
@@ -81,9 +89,11 @@ curl -fsS -H "Authorization: Bearer $NDS_API_KEY" \
   http://109.224.230.118:8000/buildz
 curl -fsS -H "Authorization: Bearer $NDS_API_KEY" \
   http://109.224.230.118:8000/v1/capacity
+curl -fsS -H "Authorization: Bearer $NDS_API_KEY" \
+  http://109.224.230.118:8000/v1/time
 ```
 
-`/buildz` should report `webrtc_asset:"webrtc.js?v=10"` or newer, `webrtc_firefox_relay_policy:true`, `webrtc_mux_enabled:true`, `webrtc_public_ip:"109.224.230.118"`, `webrtc_public_port:"8641"`, and `metrics_enabled:true`. For Firefox on Bunny, it should also report `nds_rest_turn_configured:true` or have a non-zero `config_turn_count`.
+`/buildz` should report `webrtc_asset:"webrtc.js?v=10"` or newer, `webrtc_firefox_relay_policy:true`, `webrtc_mux_enabled:true`, `webrtc_public_ip:"109.224.230.118"`, `webrtc_public_port:"8641"`, and `metrics_enabled:true`. For M4 capture-latency proof runs it should also report `nds_latency_watermark_enabled:true`. For Firefox on Bunny, it should also report `nds_rest_turn_configured:true` or have a non-zero `config_turn_count`.
 
 Create-room failures should be machine-readable JSON. A healthy but full container returns `503 no_capacity`.
 
@@ -197,7 +207,8 @@ NDS_CAPTURE_LATENCY_P50_MAX_MS=120 \
 NDS_CAPTURE_LATENCY_P95_MAX_MS=200 \
 NDS_INPUT_FRAME_P50_MAX_MS=100 \
 NDS_REQUIRE_VIDEO_LATENCY=true \
-NDS_REQUIRE_CAPTURE_LATENCY=false \
+NDS_REQUIRE_CAPTURE_LATENCY=true \
+NDS_REQUIRE_LATENCY_WATERMARK=true \
 NDS_REQUIRE_INPUT_FRAME_LATENCY=true \
 NDS_METRICS_URL=http://109.224.230.118:8000/metrics \
 NDS_CLOSE_SETTLE_MS=10000 \
@@ -223,12 +234,12 @@ NDS_ROM_SHA1=13eb2e7e5357a6e31f94ea238826c111c965bc9b
 
 Do not use a templated Laravel signed URL such as `/sessions/{room}/players/{player}/save?...` unless each final room/player URL was signed after substitution; changing path parameters after signing invalidates the signature.
 
-The script preflights `/healthz`, authenticated `/buildz`, and authenticated `/v1/capacity`, then prints JSON with health/build/capacity snapshots, join-time, RTT, FPS, browser video latency, input-to-next-frame timing, final inbound video stats, SDK state events, save-upload sink results, active/before/after metrics snapshots, metrics deltas, and threshold results. It fails before opening browsers when the deployed build is stale, Firefox/TURN prerequisites are missing, or `by_players[NDS_PLAYERS]`/`total_rooms` is below `NDS_ROOMS`. By default it also fails when capacity or connected-seat metrics do not recover after cleanup; set `NDS_REQUIRE_CAPACITY_RECOVERY=false` and `NDS_REQUIRE_METRICS_RECOVERY=false` only for shared-container smoke tests. When `NDS_METRICS_URL` is set it checks that active rooms/seats appear during the run, worker video frames increase, waits `NDS_CLOSE_SETTLE_MS` after cleanup, scrapes metrics with `Authorization: Bearer $NDS_API_KEY`, then fails the run if save-upload failures or webhook retries increase beyond the configured max values. Set `NDS_REQUIRE_NETPACKET_METRICS=true` for a multiplayer-flow proof where the ROM is expected to generate melonDS LAN packet counters. For M4 acceptance, run it on the target 16-vCPU Bunny container for 30 minutes and compare:
+The script preflights `/healthz`, authenticated `/buildz`, authenticated `/v1/capacity`, and authenticated `/v1/time`, then prints JSON with health/build/capacity/time snapshots, join-time, RTT, FPS, browser video latency, watermark capture latency, input-to-next-frame timing, final inbound video stats, SDK state events, save-upload sink results, active/before/after metrics snapshots, metrics deltas, and threshold results. It fails before opening browsers when the deployed build is stale, Firefox/TURN prerequisites are missing, `NDS_REQUIRE_LATENCY_WATERMARK=true` but `/buildz` does not report `nds_latency_watermark_enabled:true`, or `by_players[NDS_PLAYERS]`/`total_rooms` is below `NDS_ROOMS`. By default it also fails when capacity or connected-seat metrics do not recover after cleanup; set `NDS_REQUIRE_CAPACITY_RECOVERY=false` and `NDS_REQUIRE_METRICS_RECOVERY=false` only for shared-container smoke tests. When `NDS_METRICS_URL` is set it checks that active rooms/seats appear during the run, worker video frames increase, waits `NDS_CLOSE_SETTLE_MS` after cleanup, scrapes metrics with `Authorization: Bearer $NDS_API_KEY`, then fails the run if save-upload failures or webhook retries increase beyond the configured max values. Set `NDS_REQUIRE_NETPACKET_METRICS=true` for a multiplayer-flow proof where the ROM is expected to generate melonDS LAN packet counters. For M4 acceptance, run it on the target 16-vCPU Bunny container for 30 minutes and compare:
 
 ```text
 Join time p95 <= 10s with cached ROM
 Browser receive-to-display p50/p95 <= 120/200ms
-Browser capture-to-display p50/p95 <= 120/200ms when requestVideoFrameCallback exposes captureTime and `NDS_REQUIRE_CAPTURE_LATENCY=true`
+Watermark capture-to-display p50/p95 <= 120/200ms with `NDS_REQUIRE_CAPTURE_LATENCY=true` and `NDS_REQUIRE_LATENCY_WATERMARK=true`
 Input dispatch to next presented frame p50 <= 100ms
 Same-region RTT should stay comfortably below the video latency budget
 2 concurrent 4-player rooms stay connected for the full run
@@ -237,7 +248,7 @@ Worker video FPS stays positive while rooms are active
 Worker video frame metrics increase while rooms are active
 ```
 
-The automated browser latency values come from `requestVideoFrameCallback`: receive-to-display is `expectedDisplayTime - receiveTime`; capture-to-display is `expectedDisplayTime - captureTime` only when the browser exposes `captureTime`; input timing is client input dispatch to the next presented video frame. This is stronger than WebRTC RTT and is suitable for automated regression gating, but a strict physical input-to-photon claim still needs a visual timing rig or a purpose-built latency ROM that changes pixels in response to the probe input.
+The automated browser latency values come from `requestVideoFrameCallback`: receive-to-display is `expectedDisplayTime - receiveTime`; watermark capture-to-display decodes the worker Unix-ms timestamp from presented pixels and compares it with browser display time adjusted by `/v1/time` clock sync; browser `captureTime` is retained as a fallback/source-specific field when exposed. Input timing is client input dispatch to the next presented video frame. This is stronger than WebRTC RTT and is suitable for automated regression gating, but a strict physical input-to-photon claim still needs a visual timing rig or a purpose-built latency ROM that changes pixels in response to the probe input.
 
 `cloud-game/scripts/nds-load-test.mjs` is kept as a direct protocol smoke harness for service debugging, but it should not be used as the final M4 SDK proof.
 
