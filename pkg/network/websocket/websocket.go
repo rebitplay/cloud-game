@@ -62,6 +62,7 @@ var DefaultUpgrader = Upgrader{Upgrader: websocket.Upgrader{
 
 func NewUpgrader(origin string) *Upgrader {
 	u := DefaultUpgrader
+	u.Origin = origin
 	switch {
 	case origin == "*":
 		u.CheckOrigin = func(r *http.Request) bool { return true }

@@ -168,8 +168,16 @@ func (t *RPC[_, _]) callTimeout() time.Duration {
 }
 
 func (t *RPC[_, _]) Cleanup() {
+	t.calls.mu.Lock()
+	tasks := make([]*request, 0, len(t.calls.m))
+	for id, task := range t.calls.m {
+		tasks = append(tasks, task)
+		delete(t.calls.m, id)
+	}
+	t.calls.mu.Unlock()
+
 	// drain cancels all what's left in the task queue.
-	for task := range t.calls.Values() {
+	for _, task := range tasks {
 		if task.err == nil {
 			task.err = errCanceled
 		}

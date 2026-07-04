@@ -62,8 +62,10 @@ turnserver.conf
 
 ### Ignore build artifact directory
 .cache/
+.config/
 artifacts/
 bin/
+node_modules/
 .runtime/
 .coverage.out
 _output/

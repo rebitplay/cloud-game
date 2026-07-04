@@ -52,7 +52,7 @@
         .bar {
             display: grid;
             gap: 10px;
-            grid-template-columns: auto minmax(160px, 1fr) minmax(260px, 2fr) minmax(260px, 1.5fr) minmax(110px, 140px) auto;
+            grid-template-columns: auto minmax(150px, 1fr) minmax(230px, 1.2fr) minmax(230px, 1.7fr) minmax(230px, 1.2fr) minmax(90px, 120px) auto;
             padding: 10px;
         }
 
@@ -194,6 +194,10 @@
     <form class="bar" id="form">
         <h1>NDS Room API</h1>
         <label>
+            API Key
+            <input id="apiKey" type="password" autocomplete="off" spellcheck="false">
+        </label>
+        <label>
             Room
             <input id="room" value="tetris-demo" spellcheck="false">
         </label>
@@ -225,6 +229,7 @@
 <script>
     const params = new URLSearchParams(location.search);
     const form = document.getElementById("form");
+    const apiKeyInput = document.getElementById("apiKey");
     const roomInput = document.getElementById("room");
     const romInput = document.getElementById("romUrl");
     const romSha1Input = document.getElementById("romSha1");
@@ -235,6 +240,7 @@
     const linksEl = document.getElementById("links");
     const grid = document.getElementById("grid");
 
+    apiKeyInput.value = params.get("api_key") || sessionStorage.getItem("ndsDemoApiKey") || "";
     roomInput.value = params.get("room") || roomInput.value;
     romInput.value = params.get("rom") || "builtin:Tetris-DS-(USA).nds";
     const builtinRomHashes = {
@@ -267,20 +273,54 @@
         statusEl.dataset.kind = kind;
     }
 
+    function romName() {
+        const raw = romInput.value.trim();
+        if (!raw) return "game.nds";
+        if (raw.startsWith("builtin:") || raw.startsWith("local:")) {
+            return raw.slice(raw.indexOf(":") + 1).split(/[/?#]/)[0] || "game.nds";
+        }
+        try {
+            const url = new URL(raw);
+            return decodeURIComponent(url.pathname.split("/").filter(Boolean).pop() || "game.nds");
+        } catch {
+            return raw.split(/[/?#]/)[0].split("/").pop() || "game.nds";
+        }
+    }
+
     function requestPayload() {
-        const saves = [];
+        const player_slots = [];
         for (let player = 1; player <= playerCount(); player++) {
             const value = document.getElementById(`save${player}`)?.value.trim();
-            if (value) saves.push({ player, srm_url: value });
+            player_slots.push({
+                player,
+                ref: `${roomInput.value.trim()}-p${player}`,
+                save_url: value || "",
+            });
         }
         return {
-            base_url: location.origin,
             players: playerCount(),
             room: roomInput.value.trim(),
-            rom_sha1: romSha1Input.value.trim(),
-            rom_url: romInput.value.trim(),
-            saves,
+            rom: {
+                name: romName(),
+                sha1: romSha1Input.value.trim(),
+                url: romInput.value.trim(),
+            },
+            player_slots,
+            options: {
+                video_codec: "vp8",
+            },
         };
+    }
+
+    function streamUrl(session, player) {
+        const url = new URL("/", location.origin);
+        url.searchParams.set("id", session.room_id);
+        url.searchParams.set("player", String(player.player));
+        url.searchParams.set("client", "v9");
+        url.searchParams.set("view", "stream");
+        url.searchParams.set("token", player.token);
+        if (session.game) url.searchParams.set("game", session.game);
+        return url.toString();
     }
 
     async function createRoom() {
@@ -289,18 +329,27 @@
         grid.replaceChildren();
         setStatus("Creating...");
         try {
-            const response = await fetch("/api/nds/rooms", {
+            const apiKey = apiKeyInput.value.trim();
+            sessionStorage.setItem("ndsDemoApiKey", apiKey);
+            const response = await fetch("/v1/rooms", {
                 method: "POST",
-                headers: { "Content-Type": "application/json" },
+                headers: {
+                    "Authorization": `Bearer ${apiKey}`,
+                    "Content-Type": "application/json",
+                },
                 body: JSON.stringify(requestPayload()),
             });
             const data = await response.json();
             if (!response.ok) {
                 throw new Error(data.error || `HTTP ${response.status}`);
             }
-            renderSession(data);
+            renderSession({
+                game: data.game,
+                players: data.players.map((player) => ({ ...player, url: streamUrl(data, player) })),
+                room: data.room_id,
+            });
             updatePageUrl();
-            setStatus(`${data.room} / ${data.game}`);
+            setStatus(`${data.room_id} / ${data.game}`);
         } catch (error) {
             setStatus(error.message, "error");
         } finally {

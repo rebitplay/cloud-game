@@ -53,6 +53,23 @@ func TestValidateNDSRemoteURLGuard(t *testing.T) {
 	}
 }
 
+func TestValidateNDSRemoteURLAllowsPrivateWhenExplicitlyEnabled(t *testing.T) {
+	oldLookup := ndsLookupIP
+	defer func() { ndsLookupIP = oldLookup }()
+	ndsLookupIP = func(_ context.Context, _ string, host string) ([]net.IP, error) {
+		if host != "host.containers.internal" {
+			return nil, fmt.Errorf("unexpected host %s", host)
+		}
+		return []net.IP{net.ParseIP("169.254.1.2")}, nil
+	}
+	t.Setenv("NDS_DOWNLOAD_ALLOWED_HOSTS", "host.containers.internal")
+	t.Setenv("NDS_ALLOW_PRIVATE_REMOTE_URLS", "true")
+
+	if err := validateNDSRemoteURL("http://host.containers.internal:18080/save.srm"); err != nil {
+		t.Fatalf("expected private local test URL to be allowed: %v", err)
+	}
+}
+
 func TestRequestDownloadRejectsRedirectToPrivate(t *testing.T) {
 	oldLookup := ndsLookupIP
 	defer func() { ndsLookupIP = oldLookup }()

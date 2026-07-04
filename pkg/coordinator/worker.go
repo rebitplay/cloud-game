@@ -20,6 +20,7 @@ type Worker struct {
 	slotted
 
 	Addr           string
+	MonitoringURL  string
 	NDSGroup       string
 	NDSPlayer      int
 	PingServer     string
@@ -78,16 +79,17 @@ func NewWorker(sock *com.Connection, handshake api.ConnectionRequest[com.Uid], l
 		ndsGroup = inferNDSGroup(handshake.Tag, handshake.Zone)
 	}
 	return &Worker{
-		Connection: conn,
-		Addr:       handshake.Addr,
-		NDSGroup:   ndsGroup,
-		NDSPlayer:  ndsPlayer,
-		PingServer: handshake.PingURL,
-		Port:       handshake.Port,
-		Tag:        handshake.Tag,
-		WebRTCPort: handshake.WebRTCPort,
-		Zone:       handshake.Zone,
-		hub:        hub,
+		Connection:    conn,
+		Addr:          handshake.Addr,
+		MonitoringURL: handshake.MonitoringURL,
+		NDSGroup:      ndsGroup,
+		NDSPlayer:     ndsPlayer,
+		PingServer:    handshake.PingURL,
+		Port:          handshake.Port,
+		Tag:           handshake.Tag,
+		WebRTCPort:    handshake.WebRTCPort,
+		Zone:          handshake.Zone,
+		hub:           hub,
 		log: log.Extend(log.With().
 			Str(logger.ClientField, logger.MarkNone).
 			Str(logger.DirectionField, logger.MarkNone).

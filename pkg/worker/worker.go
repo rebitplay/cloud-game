@@ -80,7 +80,7 @@ func New(conf config.WorkerConfig, log *logger.Logger) (*Worker, error) {
 	worker.address = h.Addr
 	worker.services[0] = h
 	if conf.Worker.Monitoring.IsEnabled() {
-		worker.services[1] = monitoring.New(conf.Worker.Monitoring, h.GetHost(), log)
+		worker.services[1] = monitoring.New(conf.Worker.Monitoring, "127.0.0.1", log)
 	}
 	st, err := cloud.Store(conf.Storage, log)
 	if err != nil {

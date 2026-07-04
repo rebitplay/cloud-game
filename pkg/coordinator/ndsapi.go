@@ -1,10 +1,12 @@
 package coordinator
 
 import (
+	"context"
 	"crypto/sha1"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"net"
 	"net/http"
 	"net/url"
 	"os"
@@ -206,20 +208,33 @@ func (h *Hub) handleNDSCapacity() http.HandlerFunc {
 			writeAPIError(w, http.StatusMethodNotAllowed, "method_not_allowed", "method not allowed")
 			return
 		}
-		byPlayers := map[string]int{"2": 0, "3": 0, "4": 0}
-		for _, group := range h.ndsWorkerGroups() {
-			for players := 2; players <= 4; players++ {
-				if group.canHost(players) {
-					byPlayers[strconv.Itoa(players)]++
-				}
-			}
-		}
+		byPlayers := h.ndsCapacityByPlayers()
 		writeAPIJSON(w, http.StatusOK, api.NDSCapacityResponse{
 			ByPlayers:  byPlayers,
 			FreeRooms:  byPlayers["4"],
 			TotalRooms: envInt("NDS_MAX_ROOM_COUNT", len(h.ndsWorkerGroups())),
 		})
 	}
+}
+
+func (h *Hub) ndsCapacityByPlayers() map[string]int {
+	byPlayers := map[string]int{"2": 0, "3": 0, "4": 0}
+	for _, group := range h.ndsWorkerGroups() {
+		for players := 2; players <= 4; players++ {
+			if group.canHost(players) {
+				byPlayers[strconv.Itoa(players)]++
+			}
+		}
+	}
+	if h.ndsSpawner != nil && h.ndsSpawner.enabled {
+		remaining := h.ndsSpawner.remainingSpawnCapacity()
+		for players := 2; players <= 4; players++ {
+			if h.ndsSpawner.playersPerGroup >= players {
+				byPlayers[strconv.Itoa(players)] += remaining
+			}
+		}
+	}
+	return byPlayers
 }
 
 func (h *Hub) createNDSDemoRoom(r *http.Request, req ndsDemoRoomCreateRequest) (api.NDSRoomCreateResponse, int, error) {
@@ -621,10 +636,34 @@ func validateNDSAPIRemoteURL(rawURL string, field string) error {
 	if host == "" {
 		return badAPIRequest("invalid_"+field, field+" host is required")
 	}
-	if allowlist := strings.TrimSpace(firstNonEmptyEnv("NDS_DOWNLOAD_ALLOWED_HOSTS")); allowlist != "" && !ndsAPIAllowedRemoteHost(host, allowlist) {
-		return badAPIRequest("invalid_"+field, field+" host is not allowed")
+	allowPrivate := ndsAPIAllowPrivateRemoteURLs()
+	if ip := net.ParseIP(host); ip != nil && !allowPrivate && !isPublicNDSAPIIP(ip) {
+		return badAPIRequest("invalid_"+field, field+" host resolved to a non-public IP")
+	}
+	if allowlist := strings.TrimSpace(firstNonEmptyEnv("NDS_DOWNLOAD_ALLOWED_HOSTS")); allowlist != "" {
+		if !ndsAPIAllowedRemoteHost(host, allowlist) {
+			return badAPIRequest("invalid_"+field, field+" host is not allowed")
+		}
+		ips, err := ndsAPILookupIP(context.Background(), "ip", host)
+		if err != nil {
+			return badAPIRequest("invalid_"+field, field+" host could not be resolved")
+		}
+		if len(ips) == 0 {
+			return badAPIRequest("invalid_"+field, field+" host resolved no IPs")
+		}
+		for _, ip := range ips {
+			if !allowPrivate && !isPublicNDSAPIIP(ip) {
+				return badAPIRequest("invalid_"+field, field+" host resolved to a non-public IP")
+			}
+		}
 	}
 	return nil
+}
+
+var ndsAPILookupIP = net.DefaultResolver.LookupIP
+
+func ndsAPIAllowPrivateRemoteURLs() bool {
+	return envBool("NDS_ALLOW_PRIVATE_REMOTE_URLS", false)
 }
 
 func ndsAPIAllowedRemoteHost(host string, allowlist string) bool {
@@ -645,6 +684,18 @@ func ndsAPIAllowedRemoteHost(host string, allowlist string) bool {
 		}
 	}
 	return false
+}
+
+func isPublicNDSAPIIP(ip net.IP) bool {
+	if ip == nil {
+		return false
+	}
+	return !ip.IsUnspecified() &&
+		!ip.IsLoopback() &&
+		!ip.IsPrivate() &&
+		!ip.IsLinkLocalUnicast() &&
+		!ip.IsLinkLocalMulticast() &&
+		!ip.IsMulticast()
 }
 
 func makeDemoPlayerSlots(roomID string, players int, saves []api.NDSPlayerSaveRequest) []api.NDSPlayerSlotCreate {

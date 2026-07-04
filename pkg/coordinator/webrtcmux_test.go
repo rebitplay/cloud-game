@@ -7,6 +7,8 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/giongto35/cloud-game/v3/pkg/com"
+	"github.com/giongto35/cloud-game/v3/pkg/logger"
 	"github.com/pion/stun/v3"
 )
 
@@ -19,10 +21,44 @@ func TestRewriteCandidateJSON(t *testing.T) {
 	if err := json.Unmarshal([]byte(rewritten), &payload); err != nil {
 		t.Fatalf("candidate json: %v", err)
 	}
-	if got := payload["candidate"].(string); got != "candidate:123 1 udp 2122260223 203.0.113.10 8641 typ host" {
+	if got := payload["candidate"].(string); got != "candidate:123 1 udp 2122260223 203.0.113.10 8641 typ host ufrag worker123" {
 		t.Fatalf("candidate mismatch: %q", got)
 	}
 	if got := candidateJSONUfrag(rewritten); got != "worker123" {
+		t.Fatalf("ufrag mismatch: %q", got)
+	}
+}
+
+func TestRewriteCandidateJSONCopiesCandidateUfragToUsernameFragment(t *testing.T) {
+	raw := `{"candidate":"candidate:123 1 udp 2122260223 10.0.0.2 8701 typ host ufrag worker123","sdpMid":"0","sdpMLineIndex":0,"usernameFragment":null}`
+
+	rewritten := rewriteCandidateJSON(raw, "203.0.113.10", 8641)
+
+	var payload map[string]any
+	if err := json.Unmarshal([]byte(rewritten), &payload); err != nil {
+		t.Fatalf("candidate json: %v", err)
+	}
+	if got := payload["usernameFragment"]; got != "worker123" {
+		t.Fatalf("usernameFragment = %#v, want worker123", got)
+	}
+	if got := candidateJSONUfrag(rewritten); got != "worker123" {
+		t.Fatalf("ufrag mismatch: %q", got)
+	}
+}
+
+func TestRewriteCandidateJSONCopiesUsernameFragmentToCandidate(t *testing.T) {
+	raw := `{"candidate":"candidate:0 1 UDP 2122252543 firefox.local 51061 typ host","sdpMid":"0","sdpMLineIndex":0,"usernameFragment":"browser123"}`
+
+	rewritten := rewriteCandidateJSON(raw, "127.0.0.1", 8641)
+
+	var payload map[string]any
+	if err := json.Unmarshal([]byte(rewritten), &payload); err != nil {
+		t.Fatalf("candidate json: %v", err)
+	}
+	if got := payload["candidate"].(string); got != "candidate:0 1 UDP 2122252543 127.0.0.1 8641 typ host ufrag browser123" {
+		t.Fatalf("candidate mismatch: %q", got)
+	}
+	if got := candidateJSONUfrag(rewritten); got != "browser123" {
 		t.Fatalf("ufrag mismatch: %q", got)
 	}
 }
@@ -49,6 +85,65 @@ func TestRewriteRTCSessionSDP(t *testing.T) {
 	}
 	if !strings.Contains(rewritten, "candidate:123 1 udp 2122260223 203.0.113.10 8641 typ host") {
 		t.Fatalf("candidate was not rewritten: %s", rewritten)
+	}
+}
+
+func TestRewriteWorkerICERegistersActualCandidatePort(t *testing.T) {
+	mux := testWebRTCMux()
+	worker := testMuxWorker(8701)
+	raw := `{"candidate":"candidate:2101277091 1 udp 2130706431 192.168.1.221 8705 typ host ufrag worker123","sdpMid":"0","sdpMLineIndex":0,"usernameFragment":"worker123"}`
+
+	_ = mux.rewriteWorkerICE("session-1", worker, raw)
+
+	route := mux.routesBySession["session-1"]
+	if route == nil {
+		t.Fatal("expected registered route")
+	}
+	if got := route.workerAddr.String(); got != "127.0.0.1:8705" {
+		t.Fatalf("worker route = %q, want 127.0.0.1:8705", got)
+	}
+	if _, ok := mux.routesByWorker["127.0.0.1:8701"]; ok {
+		t.Fatalf("registered stale handshake port route")
+	}
+}
+
+func TestRewriteWorkerSDPRegistersActualCandidatePort(t *testing.T) {
+	mux := testWebRTCMux()
+	worker := testMuxWorker(8701)
+	raw := `{"type":"answer","sdp":"v=0\r\na=ice-ufrag:worker123\r\na=ice-pwd:workerpwd456\r\na=candidate:123 1 udp 2122260223 10.0.0.2 8706 typ host\r\na=end-of-candidates\r\n"}`
+
+	_ = mux.rewriteWorkerSDP("session-1", worker, raw)
+
+	route := mux.routesBySession["session-1"]
+	if route == nil {
+		t.Fatal("expected registered route")
+	}
+	if got := route.workerAddr.String(); got != "127.0.0.1:8706" {
+		t.Fatalf("worker route = %q, want 127.0.0.1:8706", got)
+	}
+}
+
+func TestRewriteWorkerSDPWithoutCandidateDoesNotOverwriteActualCandidatePort(t *testing.T) {
+	mux := testWebRTCMux()
+	worker := testMuxWorker(8701)
+	candidate := `{"candidate":"candidate:2101277091 1 udp 2130706431 192.168.1.221 8705 typ host ufrag worker123","sdpMid":"0","sdpMLineIndex":0,"usernameFragment":"worker123"}`
+	answer := `{"type":"answer","sdp":"v=0\r\na=ice-ufrag:worker123\r\na=ice-pwd:workerpwd456\r\n"}`
+
+	_ = mux.rewriteWorkerICE("session-1", worker, candidate)
+	_ = mux.rewriteWorkerSDP("session-1", worker, answer)
+
+	route := mux.routesBySession["session-1"]
+	if route == nil {
+		t.Fatal("expected registered route")
+	}
+	if got := route.workerAddr.String(); got != "127.0.0.1:8705" {
+		t.Fatalf("worker route = %q, want 127.0.0.1:8705", got)
+	}
+	if got := route.workerPwd; got != "workerpwd456" {
+		t.Fatalf("worker pwd = %q, want workerpwd456", got)
+	}
+	if _, ok := mux.routesByWorker["127.0.0.1:8701"]; ok {
+		t.Fatalf("registered stale handshake port route")
 	}
 }
 
@@ -187,5 +282,26 @@ func TestBrowserDestsReturnsAllLearnedBrowserAddrs(t *testing.T) {
 	}
 	if !seen["198.51.100.2:40000"] || !seen["198.51.100.2:40001"] {
 		t.Fatalf("browser dests missing learned addresses: %#v", seen)
+	}
+}
+
+func testWebRTCMux() *webRTCMux {
+	return &webRTCMux{
+		publicHost:      "203.0.113.10",
+		publicPort:      8641,
+		workerHost:      "127.0.0.1",
+		listenPort:      8641,
+		log:             logger.NewConsole(false, "test", false),
+		routesByBrowser: make(map[string]*webRTCMuxRoute),
+		routesBySession: make(map[string]*webRTCMuxRoute),
+		routesByUfrag:   make(map[string]*webRTCMuxRoute),
+		routesByWorker:  make(map[string]*webRTCMuxRoute),
+	}
+}
+
+func testMuxWorker(webrtcPort int) *Worker {
+	return &Worker{
+		Connection: &fakeNDSConnection{id: com.NewUid()},
+		WebRTCPort: webrtcPort,
 	}
 }

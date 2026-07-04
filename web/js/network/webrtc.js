@@ -147,6 +147,19 @@ const waitForIceGathering = (timeoutMs = 1200) => {
     });
 };
 
+const urlsOf = (server) => {
+    if (Array.isArray(server?.urls)) return server.urls;
+    if (server?.urls) return [server.urls];
+    return [];
+};
+
+const hasTurnServer = (iceServers = []) =>
+    iceServers.some((server) =>
+        urlsOf(server).some((url) => /^turns?:/i.test(String(url))),
+    );
+
+const isFirefox = () => /\bFirefox\//.test(navigator.userAgent);
+
 const offer = async () => {
     if (!pc || !caller) return;
 
@@ -181,7 +194,14 @@ export const webrtc = {
 
         iceServers = iceServers || [];
         log.debug("[rtc] [config] ICE:", iceServers);
-        pc = new RTCPeerConnection({ iceServers });
+        const rtcConfig = { iceServers };
+        if (isFirefox() && hasTurnServer(iceServers)) {
+            log.debug("[rtc] [config] Firefox detected; using TURN relay policy");
+            rtcConfig.iceTransportPolicy = "relay";
+        } else if (isFirefox()) {
+            log.warn("[rtc] [config] Firefox detected without TURN; ICE may fail");
+        }
+        pc = new RTCPeerConnection(rtcConfig);
 
         // push datachannel
         try {

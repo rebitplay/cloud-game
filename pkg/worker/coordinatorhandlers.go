@@ -2,11 +2,16 @@ package worker
 
 import (
 	"encoding/json"
+	"net"
+	"net/url"
+	"strconv"
+	"strings"
 
 	"github.com/giongto35/cloud-game/v3/pkg/api"
 	"github.com/giongto35/cloud-game/v3/pkg/com"
 	"github.com/giongto35/cloud-game/v3/pkg/config"
 	"github.com/giongto35/cloud-game/v3/pkg/games"
+	"github.com/giongto35/cloud-game/v3/pkg/monitoring"
 	"github.com/giongto35/cloud-game/v3/pkg/network/webrtc"
 	"github.com/giongto35/cloud-game/v3/pkg/worker/caged"
 	"github.com/giongto35/cloud-game/v3/pkg/worker/media"
@@ -17,17 +22,55 @@ import (
 func buildConnQuery(id com.Uid, conf config.Worker, webrtcPort int, address string) (string, error) {
 	addr := conf.GetPingAddr(address)
 	return toJson(api.ConnectionRequest[com.Uid]{
-		Addr:       addr.Hostname(),
-		Id:         id,
-		IsHTTPS:    conf.Server.Https,
-		NDSGroup:   conf.NDS.Group,
-		NDSPlayer:  conf.NDS.Player,
-		PingURL:    addr.String(),
-		Port:       conf.GetPort(address),
-		Tag:        conf.Tag,
-		WebRTCPort: webrtcPort,
-		Zone:       conf.Network.Zone,
+		Addr:          addr.Hostname(),
+		Id:            id,
+		IsHTTPS:       conf.Server.Https,
+		MonitoringURL: workerMonitoringURL(conf, address),
+		NDSGroup:      conf.NDS.Group,
+		NDSPlayer:     conf.NDS.Player,
+		PingURL:       addr.String(),
+		Port:          conf.GetPort(address),
+		Tag:           conf.Tag,
+		WebRTCPort:    webrtcPort,
+		Zone:          conf.Network.Zone,
 	})
+}
+
+func workerMonitoringURL(conf config.Worker, address string) string {
+	if !conf.Monitoring.MetricEnabled {
+		return ""
+	}
+
+	host, _, err := net.SplitHostPort(address)
+	if err != nil || isLoopbackMonitoringHost(host) {
+		host = "127.0.0.1"
+	}
+	if strings.HasPrefix(host, "[") && strings.HasSuffix(host, "]") {
+		host = strings.TrimPrefix(strings.TrimSuffix(host, "]"), "[")
+	}
+
+	path := strings.TrimRight(conf.Monitoring.URLPrefix, "/")
+	if path == "" {
+		path = "/metrics"
+	} else {
+		path += "/metrics"
+	}
+	return (&url.URL{
+		Scheme: "http",
+		Host:   net.JoinHostPort(host, strconv.Itoa(conf.Monitoring.Port)),
+		Path:   path,
+	}).String()
+}
+
+func isLoopbackMonitoringHost(host string) bool {
+	host = strings.Trim(strings.TrimSpace(host), "[]")
+	return host == "" ||
+		host == "::" ||
+		host == "::1" ||
+		host == "0.0.0.0" ||
+		host == "127.0.0.1" ||
+		host == "localhost" ||
+		strings.HasSuffix(host, ".localhost")
 }
 
 func (c *coordinator) HandleInitWebrtcStream(rq api.InitWebrtcStreamRequest, w *Worker, factory *webrtc.ApiFactory) api.Out {
@@ -116,6 +159,7 @@ func (c *coordinator) HandleGameStart(rq api.StartGameRequest, w *Worker) api.Ou
 		roomUsers := com.NewNetMap[room.SessionKey, *room.GameSession]()
 		r = room.NewRoom(uid, nil, &roomUsers, nil)
 		r.HandleClose = func() {
+			monitoring.SetWorkerVideoFPS(0)
 			c.CloseRoom(uid, r.StreamedBytes())
 			c.log.Debug().Msgf("room close request %v sent", uid)
 		}
@@ -190,6 +234,7 @@ func (c *coordinator) HandleGameStart(rq api.StartGameRequest, w *Worker) api.Ou
 		m.MaxThreads = coreConf.MaxThreads
 		m.VideoFPS = app.FPS()
 		m.VideoVFR = coreConf.VFR
+		monitoring.SetWorkerVideoFPS(m.VideoFPS)
 
 		m.SetPixFmt(app.PixFormat())
 		m.SetRot(app.Rotation())

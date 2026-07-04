@@ -276,6 +276,7 @@ func validateNDSRemoteURL(rawURL string) error {
 	if !ndsAllowedDownloadHost(host) {
 		return fmt.Errorf("download host %q is not allowed", host)
 	}
+	allowPrivate := ndsAllowPrivateRemoteURLs()
 	ips, err := ndsLookupIP(context.Background(), "ip", host)
 	if err != nil {
 		return fmt.Errorf("resolve download host %q: %w", host, err)
@@ -284,7 +285,7 @@ func validateNDSRemoteURL(rawURL string) error {
 		return fmt.Errorf("download host %q resolved no IPs", host)
 	}
 	for _, ip := range ips {
-		if !isPublicIP(ip) {
+		if !allowPrivate && !isPublicIP(ip) {
 			return fmt.Errorf("download host %q resolved non-public IP %s", host, ip)
 		}
 	}
@@ -292,6 +293,11 @@ func validateNDSRemoteURL(rawURL string) error {
 }
 
 var ndsLookupIP = net.DefaultResolver.LookupIP
+
+func ndsAllowPrivateRemoteURLs() bool {
+	value := strings.ToLower(strings.TrimSpace(stdos.Getenv("NDS_ALLOW_PRIVATE_REMOTE_URLS")))
+	return value == "1" || value == "true" || value == "yes"
+}
 
 func ndsAllowedDownloadHost(host string) bool {
 	raw := strings.TrimSpace(stdos.Getenv("NDS_DOWNLOAD_ALLOWED_HOSTS"))

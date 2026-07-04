@@ -125,6 +125,33 @@ func testWebsocket(t *testing.T) {
 	<-server.done
 }
 
+func TestRPCCleanupDrainsCallsBeforeClosing(t *testing.T) {
+	rpc := NewRPC[uint8, TestIn]()
+	id := NewUid()
+	task := &request{done: make(chan struct{})}
+	rpc.calls.Put(id, task)
+
+	rpc.Cleanup()
+	rpc.Cleanup()
+
+	select {
+	case <-task.done:
+	default:
+		t.Fatal("expected cleanup to unblock pending call")
+	}
+	if task.err != errCanceled {
+		t.Fatalf("expected canceled error, got %v", task.err)
+	}
+
+	message, err := json.Marshal(TestIn{Id: id, T: 1, Payload: json.RawMessage(`"late response"`)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := rpc.handleMessage(message); err != nil {
+		t.Fatalf("late response after cleanup should be ignored: %v", err)
+	}
+}
+
 func newClient(t *testing.T, addr url.URL) *SocketClient[uint8, TestIn, TestOut, *TestOut] {
 	connector := Client{}
 	conn, err := connector.Connect(addr)

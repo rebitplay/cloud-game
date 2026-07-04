@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -59,6 +60,48 @@ func TestNDSStreamBytesRecordedInClosedExtra(t *testing.T) {
 	}
 }
 
+func TestNDSConnectedSeatCountTracksAttachDetach(t *testing.T) {
+	h := NewHub(config.CoordinatorConfig{}, logger.NewConsole(false, "test", false))
+	room := &ndsRoomSession{
+		createdAt: time.Now().UTC(),
+		players: map[int]*ndsSeat{
+			1: {player: 1, ref: "user_1", roomID: "room-123-p1___Tetris"},
+			2: {player: 2, ref: "user_2", roomID: "room-123-p2___Tetris"},
+		},
+		roomID:       "room-123",
+		state:        ndsRoomReady,
+		updatedAt:    time.Now().UTC(),
+		joinDeadline: time.Now().UTC().Add(time.Minute),
+	}
+	h.ndsRooms.put(room)
+	user1 := &User{nds: &ndsUserSession{Player: 1, Ref: "user_1", RoomID: "room-123", Seat: room.players[1]}}
+	user2 := &User{nds: &ndsUserSession{Player: 2, Ref: "user_2", RoomID: "room-123", Seat: room.players[2]}}
+
+	if got := h.countNDSConnectedSeats(); got != 0 {
+		t.Fatalf("connected seats before attach = %d, want 0", got)
+	}
+
+	h.attachNDSUser(user1)
+	if got := h.countNDSConnectedSeats(); got != 1 {
+		t.Fatalf("connected seats after player 1 attach = %d, want 1", got)
+	}
+
+	h.attachNDSUser(user2)
+	if got := h.countNDSConnectedSeats(); got != 2 {
+		t.Fatalf("connected seats after player 2 attach = %d, want 2", got)
+	}
+
+	h.detachNDSUser(user1)
+	if got := h.countNDSConnectedSeats(); got != 1 {
+		t.Fatalf("connected seats after player 1 detach = %d, want 1", got)
+	}
+
+	h.detachNDSUser(user2)
+	if got := h.countNDSConnectedSeats(); got != 0 {
+		t.Fatalf("connected seats after player 2 detach = %d, want 0", got)
+	}
+}
+
 func TestNDSWebhookSignatureAndDelivery(t *testing.T) {
 	t.Setenv("NDS_WEBHOOK_SECRET", "hook-secret")
 	received := make(chan http.Header, 1)
@@ -89,6 +132,32 @@ func TestNDSWebhookSignatureAndDelivery(t *testing.T) {
 	body, _ := json.Marshal(ndsWebhookPayload{Event: "room.ready", RoomID: "room-123", State: ndsRoomReady})
 	if got := ndsWebhookSignature("hook-secret", "2026-07-03T00:00:00Z", body); got == "" {
 		t.Fatal("empty signature")
+	}
+}
+
+func TestNDSWebhookRetryKeepsDeliveryID(t *testing.T) {
+	var attempts atomic.Int32
+	deliveries := make(chan string, 2)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		deliveries <- r.Header.Get("X-NDS-Delivery")
+		if attempts.Add(1) == 1 {
+			http.Error(w, "retry", http.StatusInternalServerError)
+			return
+		}
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	defer server.Close()
+
+	h := NewHub(config.CoordinatorConfig{}, logger.NewConsole(false, "test", false))
+	h.postNDSWebhook(server.URL, "room.ready", []byte(`{"event":"room.ready","room_id":"room-123"}`))
+
+	first := <-deliveries
+	second := <-deliveries
+	if first == "" || second == "" {
+		t.Fatalf("delivery IDs must be populated: %q %q", first, second)
+	}
+	if first != second {
+		t.Fatalf("retry delivery ID changed: %q != %q", first, second)
 	}
 }
 
@@ -178,6 +247,46 @@ func TestNDSRoomCloseFlushesSavesAndReportsStatuses(t *testing.T) {
 	}
 	if got := h.ndsRooms.get("room-123").players[1].saveStatus; got != "uploaded" {
 		t.Fatalf("stored save status = %q, want uploaded", got)
+	}
+}
+
+func TestNDSRoomCloseFlushesSeatsConcurrently(t *testing.T) {
+	h := NewHub(config.CoordinatorConfig{}, logger.NewConsole(false, "test", false))
+	release := make(chan struct{})
+	started := make(chan string, 2)
+	worker1 := &Worker{Connection: &fakeNDSConnection{id: com.NewUid(), flushBlock: release, flushStarted: started}}
+	worker2 := &Worker{Connection: &fakeNDSConnection{id: com.NewUid(), flushBlock: release, flushStarted: started}}
+	h.ndsRooms.put(&ndsRoomSession{
+		createdAt: time.Now().UTC(),
+		players: map[int]*ndsSeat{
+			1: {player: 1, ref: "user_1", roomID: "room-123-p1___Tetris DS", worker: worker1},
+			2: {player: 2, ref: "user_2", roomID: "room-123-p2___Tetris DS", worker: worker2},
+		},
+		roomID:    "room-123",
+		state:     ndsRoomActive,
+		updatedAt: time.Now().UTC(),
+	})
+
+	done := make(chan struct{})
+	go func() {
+		h.closeNDSRoom("room-123", ndsCloseHost)
+		close(done)
+	}()
+
+	for i := 0; i < 2; i++ {
+		select {
+		case <-started:
+		case <-time.After(100 * time.Millisecond):
+			close(release)
+			t.Fatal("timed out waiting for concurrent save flushes to start")
+		}
+	}
+	close(release)
+
+	select {
+	case <-done:
+	case <-time.After(time.Second):
+		t.Fatal("room close did not finish after releasing save flushes")
 	}
 }
 

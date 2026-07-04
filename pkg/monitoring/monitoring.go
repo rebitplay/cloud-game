@@ -62,11 +62,17 @@ func New(conf config.Monitoring, baseAddr string, log *logger.Logger) *Monitorin
 }
 
 func (m *Monitoring) Run() {
+	if m == nil || m.server == nil {
+		return
+	}
 	m.printInfo()
 	m.server.Run()
 }
 
 func (m *Monitoring) Stop() error {
+	if m == nil || m.server == nil {
+		return nil
+	}
 	m.log.Info().Msg("Shutting down monitoring server")
 	return m.server.Stop()
 }
@@ -76,10 +82,16 @@ func (m *Monitoring) String() string {
 }
 
 func (m *Monitoring) GetMetricsPublicAddress() string {
+	if m == nil || m.server == nil {
+		return ""
+	}
 	return m.server.GetProtocol() + "://" + m.server.Addr + m.conf.URLPrefix + metricsEndpoint
 }
 
 func (m *Monitoring) GetProfilingAddress() string {
+	if m == nil || m.server == nil {
+		return ""
+	}
 	return m.server.GetProtocol() + "://" + m.server.Addr + m.conf.URLPrefix + debugEndpoint
 }
 

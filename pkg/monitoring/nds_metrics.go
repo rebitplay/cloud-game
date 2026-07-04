@@ -1,14 +1,40 @@
 package monitoring
 
 import (
+	"os"
 	"strconv"
+	"strings"
+	"sync"
 	"time"
 
 	"github.com/VictoriaMetrics/metrics"
 )
 
+var (
+	workerMetricLabelOnce sync.Once
+	workerMetricLabel     string
+)
+
 func metricLabel(value string) string {
 	return strconv.Quote(value)
+}
+
+func currentWorkerMetricLabel() string {
+	workerMetricLabelOnce.Do(func() {
+		workerMetricLabel = strings.TrimSpace(os.Getenv("CLOUD_GAME_WORKER_TAG"))
+		if workerMetricLabel == "" {
+			workerMetricLabel = strings.TrimSpace(os.Getenv("HOSTNAME"))
+		}
+		if workerMetricLabel == "" {
+			if hostname, err := os.Hostname(); err == nil {
+				workerMetricLabel = strings.TrimSpace(hostname)
+			}
+		}
+		if workerMetricLabel == "" {
+			workerMetricLabel = "unknown"
+		}
+	})
+	return workerMetricLabel
 }
 
 func ObserveNDSRoomCreate(status string, duration time.Duration) {
@@ -44,10 +70,18 @@ func AddNDSNetpacketStats(room string, player uint16, txPackets uint64, rxPacket
 	}
 }
 
+func SetWorkerVideoFPS(fps float64) {
+	if fps < 0 {
+		fps = 0
+	}
+	metrics.GetOrCreateGauge(`cloud_game_worker_video_fps{worker=`+metricLabel(currentWorkerMetricLabel())+`}`, nil).Set(fps)
+}
+
 func ObserveWorkerVideoEncode(duration time.Duration) {
-	metrics.GetOrCreateHistogram("cloud_game_worker_video_encode_duration_seconds").Update(duration.Seconds())
+	metrics.GetOrCreateHistogram(`cloud_game_worker_video_encode_duration_seconds{worker=` + metricLabel(currentWorkerMetricLabel()) + `}`).
+		Update(duration.Seconds())
 }
 
 func IncWorkerVideoFrame() {
-	metrics.GetOrCreateCounter("cloud_game_worker_video_frames_total").Inc()
+	metrics.GetOrCreateCounter(`cloud_game_worker_video_frames_total{worker=` + metricLabel(currentWorkerMetricLabel()) + `}`).Inc()
 }

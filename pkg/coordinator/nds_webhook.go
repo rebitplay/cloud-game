@@ -46,8 +46,9 @@ func (h *Hub) emitNDSWebhook(event string, room *ndsRoomSession, extra map[strin
 
 func (h *Hub) postNDSWebhook(rawURL string, event string, body []byte) {
 	backoff := time.Second
+	deliveryID := xid.New().String()
 	for attempt := 0; attempt < 5; attempt++ {
-		if err := postNDSWebhookOnce(rawURL, event, body); err != nil {
+		if err := postNDSWebhookOnce(rawURL, event, body, deliveryID); err != nil {
 			h.log.Warn().Err(err).Str("event", event).Int("attempt", attempt+1).Msg("NDS webhook delivery failed")
 			if attempt < 4 {
 				monitoring.IncNDSWebhookRetry(event)
@@ -63,14 +64,14 @@ func (h *Hub) postNDSWebhook(rawURL string, event string, body []byte) {
 	}
 }
 
-func postNDSWebhookOnce(rawURL string, event string, body []byte) error {
+func postNDSWebhookOnce(rawURL string, event string, body []byte, deliveryID string) error {
 	req, err := http.NewRequest(http.MethodPost, rawURL, bytes.NewReader(body))
 	if err != nil {
 		return err
 	}
 	timestamp := time.Now().UTC().Format(time.RFC3339)
 	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("X-NDS-Delivery", xid.New().String())
+	req.Header.Set("X-NDS-Delivery", deliveryID)
 	req.Header.Set("X-NDS-Event", event)
 	req.Header.Set("X-NDS-Timestamp", timestamp)
 	if secret := firstNonEmptyEnv("NDS_WEBHOOK_SECRET"); secret != "" {

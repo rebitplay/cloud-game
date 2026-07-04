@@ -1,6 +1,7 @@
 package coordinator
 
 import (
+	"sync"
 	"time"
 
 	"github.com/giongto35/cloud-game/v3/pkg/api"
@@ -138,34 +139,19 @@ func (h *Hub) finishNDSRoomClose(room *ndsRoomSession, reason string) *ndsRoomSe
 	seats := room.sortedSeats()
 	room.mu.Unlock()
 
-	for _, seat := range seats {
-		status := api.NDSSaveStatus{
-			Player: seat.player,
-			Ref:    seat.ref,
-			RoomID: seat.roomID,
-			Status: "unchanged",
-		}
-		if seat.worker != nil {
-			resp, err := seat.worker.FlushNDSSave(seat.roomID)
-			if err != nil || resp == nil {
-				monitoring.IncNDSSaveUploadFailure("final_flush")
-				status.Status = "failed"
-			} else {
-				status = *resp
-				if status.Player == 0 {
-					status.Player = seat.player
-				}
-				if status.Ref == "" {
-					status.Ref = seat.ref
-				}
-				if status.RoomID == "" {
-					status.RoomID = seat.roomID
-				}
-				if status.Status == "" {
-					status.Status = "unchanged"
-				}
-			}
-		}
+	statuses := make([]api.NDSSaveStatus, len(seats))
+	var wg sync.WaitGroup
+	for i, seat := range seats {
+		i, seat := i, seat
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			statuses[i] = flushNDSSeatSave(seat)
+		}()
+	}
+	wg.Wait()
+
+	for _, status := range statuses {
 		h.recordNDSSaveStatus(status)
 	}
 
@@ -185,6 +171,40 @@ func (h *Hub) finishNDSRoomClose(room *ndsRoomSession, reason string) *ndsRoomSe
 	h.emitNDSWebhook("room.closed", room, h.ndsRoomClosedExtra(room, reason))
 	h.writeNDSJournal()
 	return room
+}
+
+func flushNDSSeatSave(seat *ndsSeat) api.NDSSaveStatus {
+	status := api.NDSSaveStatus{
+		Player: seat.player,
+		Ref:    seat.ref,
+		RoomID: seat.roomID,
+		Status: "unchanged",
+	}
+	if seat.worker == nil {
+		return status
+	}
+
+	resp, err := seat.worker.FlushNDSSave(seat.roomID)
+	if err != nil || resp == nil {
+		monitoring.IncNDSSaveUploadFailure("final_flush")
+		status.Status = "failed"
+		return status
+	}
+
+	status = *resp
+	if status.Player == 0 {
+		status.Player = seat.player
+	}
+	if status.Ref == "" {
+		status.Ref = seat.ref
+	}
+	if status.RoomID == "" {
+		status.RoomID = seat.roomID
+	}
+	if status.Status == "" {
+		status.Status = "unchanged"
+	}
+	return status
 }
 
 func (h *Hub) closeAllNDSRooms(reason string) {

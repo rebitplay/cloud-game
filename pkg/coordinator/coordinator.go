@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"strings"
 
+	"github.com/VictoriaMetrics/metrics"
 	"github.com/giongto35/cloud-game/v3/pkg/config"
 	"github.com/giongto35/cloud-game/v3/pkg/logger"
 	"github.com/giongto35/cloud-game/v3/pkg/monitoring"
@@ -27,14 +28,7 @@ func New(conf config.CoordinatorConfig, log *logger.Logger) (*Coordinator, error
 		return nil, err
 	}
 	h, err := NewHTTPServer(conf, log, func(mux *httpx.Mux) *httpx.Mux {
-		mux.HandleFunc("/healthz", coordinator.hub.handleHealthz())
-		mux.HandleFunc("/api/nds/rooms", coordinator.hub.handleNDSDemoRoomCreate())
-		mux.HandleFunc("/v1/capacity", coordinator.hub.requireNDSAPIKey(coordinator.hub.handleNDSCapacity()))
-		mux.HandleFunc("/v1/rooms", coordinator.hub.requireNDSAPIKey(coordinator.hub.handleNDSRooms()))
-		mux.HandleFunc("/v1/rooms/", coordinator.hub.requireNDSAPIKey(coordinator.hub.handleNDSRoomByID()))
-		mux.HandleFunc("/ws", coordinator.hub.handleUserConnection())
-		mux.HandleFunc("/wso", coordinator.hub.handleWorkerConnection())
-		return mux
+		return coordinator.registerRoutes(conf, mux)
 	})
 	if err != nil {
 		return nil, fmt.Errorf("http init fail: %w", err)
@@ -44,6 +38,33 @@ func New(conf config.CoordinatorConfig, log *logger.Logger) (*Coordinator, error
 		coordinator.services[1] = monitoring.New(conf.Coordinator.Monitoring, h.GetHost(), log)
 	}
 	return coordinator, nil
+}
+
+func (c *Coordinator) registerRoutes(conf config.CoordinatorConfig, mux *httpx.Mux) *httpx.Mux {
+	mux.HandleFunc("/healthz", c.hub.handleHealthz())
+	mux.HandleFunc("/buildz", c.hub.requireNDSAPIKey(handleBuildz(conf)))
+	if coordinatorPublicMetricsEnabled(conf) {
+		mux.HandleFunc("/metrics", c.hub.requireNDSAPIKey(c.hub.handleCoordinatorMetrics()))
+	}
+	mux.HandleFunc("/v1/capacity", c.hub.requireNDSAPIKey(c.hub.handleNDSCapacity()))
+	mux.HandleFunc("/v1/rooms", c.hub.requireNDSAPIKey(c.hub.handleNDSRooms()))
+	mux.HandleFunc("/v1/rooms/", c.hub.requireNDSAPIKey(c.hub.handleNDSRoomByID()))
+	mux.HandleFunc("/ws", c.hub.handleUserConnection())
+	mux.HandleFunc("/wso", c.hub.handleWorkerConnection())
+	return mux
+}
+
+func coordinatorPublicMetricsEnabled(conf config.CoordinatorConfig) bool {
+	return conf.Coordinator.Monitoring.MetricEnabled ||
+		envBool("NDS_PUBLIC_METRICS", false) ||
+		envBool("CLOUD_GAME_COORDINATOR_PUBLIC_METRICS", false)
+}
+
+func (h *Hub) handleCoordinatorMetrics() http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		metrics.WritePrometheus(w, true)
+		h.writeWorkerMetrics(r.Context(), w)
+	}
 }
 
 func (c *Coordinator) Start() {

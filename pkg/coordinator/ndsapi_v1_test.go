@@ -2,8 +2,11 @@ package coordinator
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -16,10 +19,12 @@ import (
 	"github.com/giongto35/cloud-game/v3/pkg/com"
 	"github.com/giongto35/cloud-game/v3/pkg/config"
 	"github.com/giongto35/cloud-game/v3/pkg/logger"
+	"github.com/giongto35/cloud-game/v3/pkg/network/httpx"
 )
 
 type fakeNDSConnection struct {
 	flushBlock    <-chan struct{}
+	flushStarted  chan<- string
 	flushStatus   *api.NDSSaveStatus
 	id            com.Uid
 	lastStart     *api.StartGameRequest
@@ -45,6 +50,10 @@ func (f *fakeNDSConnection) Send(t api.PT, payload any) ([]byte, error) {
 	case api.NDSSessionPrepare:
 		return json.Marshal(api.OK)
 	case api.NDSFlushSave:
+		if f.flushStarted != nil {
+			req := payload.(api.NDSFlushSaveRequest)
+			f.flushStarted <- req.RoomID
+		}
 		if f.flushBlock != nil {
 			<-f.flushBlock
 		}
@@ -67,6 +76,7 @@ func (f *fakeNDSConnection) Send(t api.PT, payload any) ([]byte, error) {
 
 func TestNDSV1AuthAndHealthz(t *testing.T) {
 	t.Setenv("NDS_API_KEY", "test-key")
+	t.Setenv("NDS_API_KEYS", "next-key, fallback-key")
 
 	h := testNDSHub(t, 1)
 
@@ -82,12 +92,185 @@ func TestNDSV1AuthAndHealthz(t *testing.T) {
 		t.Fatalf("capacity without auth status = %d, want %d", noAuth.Code, http.StatusUnauthorized)
 	}
 
-	withAuth := httptest.NewRecorder()
+	for _, key := range []string{"test-key", "next-key", "fallback-key"} {
+		withAuth := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodGet, "/v1/capacity", nil)
+		req.Header.Set("Authorization", "Bearer "+key)
+		h.requireNDSAPIKey(h.handleNDSCapacity())(withAuth, req)
+		if withAuth.Code != http.StatusOK {
+			t.Fatalf("capacity with auth key %q status = %d, want %d; body=%s", key, withAuth.Code, http.StatusOK, withAuth.Body.String())
+		}
+	}
+
+	badAuth := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/v1/capacity", nil)
+	req.Header.Set("Authorization", "Bearer wrong-key")
+	h.requireNDSAPIKey(h.handleNDSCapacity())(badAuth, req)
+	if badAuth.Code != http.StatusUnauthorized {
+		t.Fatalf("capacity with wrong auth status = %d, want %d", badAuth.Code, http.StatusUnauthorized)
+	}
+}
+
+func TestNDSV1RoutesRequireAuth(t *testing.T) {
+	t.Setenv("NDS_API_KEY", "test-key")
+	conf := config.CoordinatorConfig{}
+	coordinator := &Coordinator{hub: NewHub(conf, logger.NewConsole(false, "test", false))}
+
+	for _, tc := range []struct {
+		method string
+		path   string
+	}{
+		{http.MethodGet, "/v1/capacity"},
+		{http.MethodPost, "/v1/rooms"},
+		{http.MethodGet, "/v1/rooms/room-123"},
+		{http.MethodDelete, "/v1/rooms/room-123"},
+		{http.MethodPost, "/v1/rooms/room-123/players/1/token"},
+	} {
+		rec := httptest.NewRecorder()
+		coordinator.registerRoutes(conf, httpx.NewServeMux("")).ServeHTTP(rec, httptest.NewRequest(tc.method, tc.path, nil))
+		if rec.Code != http.StatusUnauthorized {
+			t.Fatalf("%s %s without auth status = %d, want %d; body=%s", tc.method, tc.path, rec.Code, http.StatusUnauthorized, rec.Body.String())
+		}
+	}
+}
+
+func TestNDSV1CapacityIncludesDynamicSpawnableRooms(t *testing.T) {
+	t.Setenv("NDS_API_KEY", "test-key")
+	t.Setenv("NDS_MAX_ROOM_COUNT", "2")
+	h := testNDSHub(t, 1)
+	h.ndsSpawner = &ndsSpawner{
+		enabled:         true,
+		maxGroups:       2,
+		playersPerGroup: 4,
+		nextGroup:       2,
+	}
+
+	rec := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodGet, "/v1/capacity", nil)
 	req.Header.Set("Authorization", "Bearer test-key")
-	h.requireNDSAPIKey(h.handleNDSCapacity())(withAuth, req)
-	if withAuth.Code != http.StatusOK {
-		t.Fatalf("capacity with auth status = %d, want %d; body=%s", withAuth.Code, http.StatusOK, withAuth.Body.String())
+	h.requireNDSAPIKey(h.handleNDSCapacity())(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("capacity status = %d, want %d; body=%s", rec.Code, http.StatusOK, rec.Body.String())
+	}
+
+	var resp api.NDSCapacityResponse
+	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
+		t.Fatal(err)
+	}
+	if resp.TotalRooms != 2 || resp.FreeRooms != 2 || resp.ByPlayers["4"] != 2 {
+		t.Fatalf("dynamic capacity not included: %#v", resp)
+	}
+}
+
+func TestCoordinatorPublicMetricsRoute(t *testing.T) {
+	t.Setenv("NDS_API_KEY", "test-key")
+	t.Setenv("NDS_PUBLIC_METRICS", "false")
+	t.Setenv("CLOUD_GAME_COORDINATOR_PUBLIC_METRICS", "false")
+	conf := config.CoordinatorConfig{}
+	coordinator := &Coordinator{hub: NewHub(conf, logger.NewConsole(false, "test", false))}
+
+	disabled := httptest.NewRecorder()
+	coordinator.registerRoutes(conf, httpx.NewServeMux("")).ServeHTTP(disabled, httptest.NewRequest(http.MethodGet, "/metrics", nil))
+	if disabled.Code != http.StatusNotFound {
+		t.Fatalf("metrics status without opt-in = %d, want %d", disabled.Code, http.StatusNotFound)
+	}
+
+	t.Setenv("NDS_PUBLIC_METRICS", "true")
+	noAuth := httptest.NewRecorder()
+	coordinator.registerRoutes(conf, httpx.NewServeMux("")).ServeHTTP(noAuth, httptest.NewRequest(http.MethodGet, "/metrics", nil))
+	if noAuth.Code != http.StatusUnauthorized {
+		t.Fatalf("metrics status without auth = %d, want %d", noAuth.Code, http.StatusUnauthorized)
+	}
+
+	enabled := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/metrics", nil)
+	req.Header.Set("Authorization", "Bearer test-key")
+	coordinator.registerRoutes(conf, httpx.NewServeMux("")).ServeHTTP(enabled, req)
+	if enabled.Code != http.StatusOK {
+		t.Fatalf("metrics status with opt-in = %d, want %d; body=%s", enabled.Code, http.StatusOK, enabled.Body.String())
+	}
+	if !strings.Contains(enabled.Body.String(), "cloud_game_nds_rooms") {
+		t.Fatalf("NDS metrics missing from /metrics body: %s", enabled.Body.String())
+	}
+}
+
+func TestCoordinatorBuildzRouteReportsFrontendAndEnv(t *testing.T) {
+	t.Setenv("NDS_API_KEY", "test-key")
+	t.Setenv("NDS_TURN_URLS", "turn:turn.example.com:3478?transport=udp")
+	t.Setenv("NDS_TURN_SECRET", "turn-secret")
+	t.Setenv("WEBRTC_MUX_ENABLED", "true")
+	t.Setenv("WEBRTC_PUBLIC_IP", "109.224.230.118")
+	t.Setenv("WEBRTC_PUBLIC_PORT", "8641")
+	t.Setenv("NDS_PUBLIC_METRICS", "true")
+	BuildVersion = "test-version"
+	t.Cleanup(func() { BuildVersion = "?" })
+
+	conf := config.CoordinatorConfig{}
+	coordinator := &Coordinator{hub: NewHub(conf, logger.NewConsole(false, "test", false))}
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/buildz", nil)
+	req.Header.Set("Authorization", "Bearer test-key")
+	coordinator.registerRoutes(conf, httpx.NewServeMux("")).ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("buildz status = %d, want %d; body=%s", rec.Code, http.StatusOK, rec.Body.String())
+	}
+
+	var resp buildzResponse
+	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
+		t.Fatal(err)
+	}
+	if resp.Version != "test-version" {
+		t.Fatalf("version = %q", resp.Version)
+	}
+	if resp.WebRTCAsset != "webrtc.js?v=10" {
+		t.Fatalf("webrtc asset = %q, want v10; body=%s", resp.WebRTCAsset, rec.Body.String())
+	}
+	if !resp.WebRTCFirefoxRelayPolicy {
+		t.Fatalf("Firefox relay policy not detected; body=%s", rec.Body.String())
+	}
+	if !resp.NDSRestTURNConfigured || !resp.WebRTCMuxEnabled || !resp.MetricsEnabled {
+		t.Fatalf("expected deploy flags missing; body=%s", rec.Body.String())
+	}
+	if resp.WebRTCPublicIP != "109.224.230.118" || resp.WebRTCPublicPort != "8641" {
+		t.Fatalf("public WebRTC fields wrong; body=%s", rec.Body.String())
+	}
+
+	noAuth := httptest.NewRecorder()
+	coordinator.registerRoutes(conf, httpx.NewServeMux("")).ServeHTTP(noAuth, httptest.NewRequest(http.MethodGet, "/buildz", nil))
+	if noAuth.Code != http.StatusUnauthorized {
+		t.Fatalf("buildz without auth status = %d, want %d", noAuth.Code, http.StatusUnauthorized)
+	}
+}
+
+func TestNDSDemoRouteIsNotRegistered(t *testing.T) {
+	t.Setenv("NDS_API_KEY", "test-key")
+	conf := config.CoordinatorConfig{}
+	coordinator := &Coordinator{hub: NewHub(conf, logger.NewConsole(false, "test", false))}
+
+	rec := httptest.NewRecorder()
+	coordinator.registerRoutes(conf, httpx.NewServeMux("")).ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/api/nds/rooms", nil))
+	if rec.Code != http.StatusNotFound {
+		t.Fatalf("demo route status = %d, want %d", rec.Code, http.StatusNotFound)
+	}
+}
+
+func TestCoordinatorMetricsIncludeNDSRoomCreateDuration(t *testing.T) {
+	t.Setenv("NDS_API_KEY", "test-key")
+	t.Setenv("NDS_TOKEN_SECRET", "token-secret")
+	t.Setenv("NDS_PUBLIC_ENDPOINT", "https://sg-1.nds.rebitplay.com")
+
+	h := testNDSHub(t, 1)
+	create := postNDSRoom(t, h, testNDSCreateBody("room-metrics", 2))
+	if create.Code != http.StatusCreated {
+		t.Fatalf("create status = %d, want %d; body=%s", create.Code, http.StatusCreated, create.Body.String())
+	}
+
+	metrics := httptest.NewRecorder()
+	h.handleCoordinatorMetrics()(metrics, httptest.NewRequest(http.MethodGet, "/metrics", nil))
+	body := metrics.Body.String()
+	if !strings.Contains(body, "cloud_game_nds_room_create_duration_seconds") || !strings.Contains(body, `status="201"`) {
+		t.Fatalf("room create duration metric missing from /metrics body: %s", body)
 	}
 }
 
@@ -177,6 +360,63 @@ func TestNDSV1CreateRejectsDisallowedRemoteHost(t *testing.T) {
 	}
 	if errResp.Code != "invalid_rom_url" {
 		t.Fatalf("bad host code = %q, want invalid_rom_url", errResp.Code)
+	}
+}
+
+func TestNDSAPIRemoteURLSSRFGuard(t *testing.T) {
+	oldLookup := ndsAPILookupIP
+	t.Cleanup(func() { ndsAPILookupIP = oldLookup })
+	ndsAPILookupIP = func(_ context.Context, _ string, host string) ([]net.IP, error) {
+		switch host {
+		case "cdn.rebitplay.com", "roms.b-cdn.net":
+			return []net.IP{net.ParseIP("203.0.113.10")}, nil
+		case "private.rebitplay.com":
+			return []net.IP{net.ParseIP("10.0.0.2")}, nil
+		default:
+			return nil, fmt.Errorf("unexpected host %s", host)
+		}
+	}
+	t.Setenv("NDS_DOWNLOAD_ALLOWED_HOSTS", "*.b-cdn.net,cdn.rebitplay.com,private.rebitplay.com,10.0.0.1")
+
+	tests := []struct {
+		name    string
+		rawURL  string
+		wantErr bool
+	}{
+		{name: "allowlisted exact host", rawURL: "https://cdn.rebitplay.com/rom.nds"},
+		{name: "allowlisted Bunny wildcard host", rawURL: "https://roms.b-cdn.net/rom.nds"},
+		{name: "literal private IP rejected", rawURL: "https://10.0.0.1/rom.nds", wantErr: true},
+		{name: "allowlisted host resolving private rejected", rawURL: "https://private.rebitplay.com/rom.nds", wantErr: true},
+		{name: "disallowed host rejected", rawURL: "https://evil.example/rom.nds", wantErr: true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := validateNDSAPIRemoteURL(tt.rawURL, "rom_url")
+			if tt.wantErr && err == nil {
+				t.Fatal("expected error")
+			}
+			if !tt.wantErr && err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+		})
+	}
+}
+
+func TestNDSAPIRemoteURLAllowsPrivateWhenExplicitlyEnabled(t *testing.T) {
+	oldLookup := ndsAPILookupIP
+	t.Cleanup(func() { ndsAPILookupIP = oldLookup })
+	ndsAPILookupIP = func(_ context.Context, _ string, host string) ([]net.IP, error) {
+		if host != "host.containers.internal" {
+			return nil, fmt.Errorf("unexpected host %s", host)
+		}
+		return []net.IP{net.ParseIP("169.254.1.2")}, nil
+	}
+	t.Setenv("NDS_DOWNLOAD_ALLOWED_HOSTS", "host.containers.internal")
+	t.Setenv("NDS_ALLOW_PRIVATE_REMOTE_URLS", "true")
+
+	if err := validateNDSAPIRemoteURL("http://host.containers.internal:18080/save.srm", "save_upload_url"); err != nil {
+		t.Fatalf("expected private local test URL to be allowed: %v", err)
 	}
 }
 

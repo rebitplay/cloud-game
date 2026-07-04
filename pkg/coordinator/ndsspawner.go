@@ -130,6 +130,19 @@ func (s *ndsSpawner) spawnGroup(h *Hub, players int) error {
 	return s.startGroup(h, groupID, players)
 }
 
+func (s *ndsSpawner) remainingSpawnCapacity() int {
+	if s == nil || !s.enabled {
+		return 0
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	remaining := s.maxGroups - (s.nextGroup - 1)
+	if remaining < 0 {
+		return 0
+	}
+	return remaining
+}
+
 func (s *ndsSpawner) startGroup(h *Hub, groupID string, requestedPlayers int) error {
 	s.log.Info().
 		Str("group", groupID).

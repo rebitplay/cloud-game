@@ -14,6 +14,7 @@ func main() {
 	conf.ParseFlags()
 
 	log := logger.NewConsole(conf.Coordinator.Debug, "c", false)
+	coordinator.BuildVersion = Version
 	log.Info().Msgf("version %s", Version)
 	log.Info().Msgf("conf: v%v, loaded: %v", conf.Version, paths)
 	if log.GetLevel() < logger.InfoLevel {

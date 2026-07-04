@@ -151,12 +151,6 @@ func (m *webRTCMux) forward(packet []byte, src *net.UDPAddr) {
 
 	m.rememberBrowser(route, src)
 	m.tracePacket("browser->worker", packet, src, route, false)
-	if reply := buildSTUNBindingSuccess(packet, src, route.workerPwd); reply != nil {
-		m.tracePacket("browser<-mux", reply, src, route, true)
-		if _, err := m.conn.WriteToUDP(reply, src); err != nil {
-			m.log.Debug().Err(err).Str("dst", src.String()).Msg("WebRTC mux STUN reply to browser failed")
-		}
-	}
 	if _, err := m.conn.WriteToUDP(packet, route.workerAddr); err != nil {
 		m.log.Debug().Err(err).Str("dst", route.workerAddr.String()).Msg("WebRTC mux write to worker failed")
 	}
@@ -296,9 +290,10 @@ func preferBrowserAddr(current *net.UDPAddr, next *net.UDPAddr) bool {
 }
 
 func (m *webRTCMux) rewriteWorkerSDP(sessionID string, w *Worker, raw string) string {
+	workerPort := extractRTCSessionSDPCandidatePort(raw)
 	rewritten, ufrag := rewriteRTCSessionSDP(raw, m.publicHost, m.publicPort)
 	if ufrag != "" {
-		m.registerWorkerSession(sessionID, w, ufrag, extractRTCSessionSDPPwd(raw))
+		m.registerWorkerSession(sessionID, w, ufrag, extractRTCSessionSDPPwd(raw), workerPort)
 	}
 	return rewritten
 }
@@ -312,8 +307,9 @@ func (m *webRTCMux) rewriteWorkerICE(sessionID string, w *Worker, raw string) st
 	if raw == "" {
 		return raw
 	}
+	workerPort := candidateJSONPort(raw)
 	if ufrag := candidateJSONUfrag(raw); ufrag != "" {
-		m.registerWorkerSession(sessionID, w, ufrag, "")
+		m.registerWorkerSession(sessionID, w, ufrag, "", workerPort)
 	}
 	return rewriteCandidateJSON(raw, m.publicHost, m.publicPort)
 }
@@ -325,14 +321,8 @@ func (m *webRTCMux) rewriteUserICE(raw string) string {
 	return rewriteCandidateJSON(raw, m.workerHost, m.listenPort)
 }
 
-func (m *webRTCMux) registerWorkerSession(sessionID string, w *Worker, workerUfrag string, workerPwd string) {
+func (m *webRTCMux) registerWorkerSession(sessionID string, w *Worker, workerUfrag string, workerPwd string, workerPort int) {
 	if m == nil || w == nil || sessionID == "" || workerUfrag == "" || w.WebRTCPort == 0 {
-		return
-	}
-
-	workerAddr, err := net.ResolveUDPAddr("udp", net.JoinHostPort(m.workerHost, strconv.Itoa(w.WebRTCPort)))
-	if err != nil {
-		m.log.Warn().Err(err).Str("worker", w.Id().String()).Msg("WebRTC mux worker addr resolve failed")
 		return
 	}
 
@@ -343,6 +333,20 @@ func (m *webRTCMux) registerWorkerSession(sessionID string, w *Worker, workerUfr
 	if route == nil {
 		route = &webRTCMuxRoute{sessionID: sessionID, workerID: w.Id().String()}
 		m.routesBySession[sessionID] = route
+	}
+
+	if workerPort <= 0 {
+		if route.workerAddr != nil && route.workerID == w.Id().String() && route.workerUfrag == workerUfrag {
+			workerPort = route.workerAddr.Port
+		} else {
+			workerPort = w.WebRTCPort
+		}
+	}
+
+	workerAddr, err := net.ResolveUDPAddr("udp", net.JoinHostPort(m.workerHost, strconv.Itoa(workerPort)))
+	if err != nil {
+		m.log.Warn().Err(err).Str("worker", w.Id().String()).Msg("WebRTC mux worker addr resolve failed")
+		return
 	}
 
 	if route.workerUfrag != "" && route.workerUfrag != workerUfrag {
@@ -451,7 +455,17 @@ func rewriteCandidateJSON(raw string, host string, port int) string {
 		return raw
 	}
 
+	usernameFragment, _ := payload["usernameFragment"].(string)
+	if usernameFragment == "" {
+		usernameFragment = candidateAttribute(rewritten, "ufrag")
+	} else if candidateAttribute(rewritten, "ufrag") == "" {
+		rewritten += " ufrag " + usernameFragment
+	}
+
 	payload["candidate"] = rewritten
+	if usernameFragment != "" {
+		payload["usernameFragment"] = usernameFragment
+	}
 	if host != "" {
 		payload["address"] = host
 	}
@@ -478,6 +492,17 @@ func candidateJSONUfrag(raw string) string {
 		return candidateAttribute(candidate, "ufrag")
 	}
 	return ""
+}
+
+func candidateJSONPort(raw string) int {
+	payload := map[string]any{}
+	if err := json.Unmarshal([]byte(raw), &payload); err != nil {
+		return 0
+	}
+	if candidate, ok := payload["candidate"].(string); ok {
+		return candidatePort(candidate)
+	}
+	return 0
 }
 
 func rewriteSDPCandidates(sdp string, host string, port int) string {
@@ -572,6 +597,26 @@ func extractSDPPwd(sdp string) string {
 	return ""
 }
 
+func extractRTCSessionSDPCandidatePort(raw string) int {
+	payload := map[string]any{}
+	if err := json.Unmarshal([]byte(raw), &payload); err != nil {
+		return 0
+	}
+	sdp, _ := payload["sdp"].(string)
+	return extractSDPCandidatePort(sdp)
+}
+
+func extractSDPCandidatePort(sdp string) int {
+	for _, line := range strings.Split(sdp, "\n") {
+		line = strings.TrimSpace(line)
+		line = strings.TrimPrefix(line, "a=")
+		if port := candidatePort(line); port > 0 {
+			return port
+		}
+	}
+	return 0
+}
+
 func extractRTCSessionSDPPwd(raw string) string {
 	payload := map[string]any{}
 	if err := json.Unmarshal([]byte(raw), &payload); err != nil {
@@ -579,6 +624,21 @@ func extractRTCSessionSDPPwd(raw string) string {
 	}
 	sdp, _ := payload["sdp"].(string)
 	return extractSDPPwd(sdp)
+}
+
+func candidatePort(candidate string) int {
+	fields := strings.Fields(candidate)
+	if len(fields) < 8 || !strings.HasPrefix(fields[0], "candidate:") || !strings.EqualFold(fields[2], "udp") {
+		return 0
+	}
+	if typ := candidateAttribute(candidate, "typ"); typ != "" && !strings.EqualFold(typ, "host") {
+		return 0
+	}
+	port, err := strconv.Atoi(fields[5])
+	if err != nil || port <= 0 || port > 65535 {
+		return 0
+	}
+	return port
 }
 
 func candidateAttribute(candidate string, attr string) string {

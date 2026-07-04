@@ -51,7 +51,7 @@ func ndsAPIKeyFromAuthorization(header string) (string, bool) {
 		return "", false
 	}
 	for _, key := range ndsAPIKeys() {
-		if subtle.ConstantTimeCompare([]byte(got), []byte(key)) == 1 {
+		if constantTimeStringEqual(got, key) {
 			return key, true
 		}
 	}
@@ -69,6 +69,12 @@ func ndsAPIKeys() []string {
 		}
 	}
 	return keys
+}
+
+func constantTimeStringEqual(a string, b string) bool {
+	ah := sha256.Sum256([]byte(a))
+	bh := sha256.Sum256([]byte(b))
+	return subtle.ConstantTimeCompare(ah[:], bh[:]) == 1
 }
 
 func makeNDSSeatToken(roomID string, player int, ref string, now time.Time) (string, error) {

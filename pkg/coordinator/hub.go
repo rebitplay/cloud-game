@@ -227,17 +227,18 @@ func (h *Hub) GetServerList() (r []api.Server) {
 	debug := h.conf.Coordinator.Debug
 	for w := range h.workers.Values() {
 		server := api.Server{
-			Addr:       w.Addr,
-			Id:         w.Id(),
-			IsBusy:     !w.HasSlot(),
-			Machine:    string(w.Id().Machine()),
-			NDSGroup:   w.NDSGroup,
-			NDSPlayer:  w.NDSPlayer,
-			PingURL:    w.PingServer,
-			Port:       w.Port,
-			Tag:        w.Tag,
-			WebRTCPort: w.WebRTCPort,
-			Zone:       w.Zone,
+			Addr:          w.Addr,
+			Id:            w.Id(),
+			IsBusy:        !w.HasSlot(),
+			Machine:       string(w.Id().Machine()),
+			MonitoringURL: w.MonitoringURL,
+			NDSGroup:      w.NDSGroup,
+			NDSPlayer:     w.NDSPlayer,
+			PingURL:       w.PingServer,
+			Port:          w.Port,
+			Tag:           w.Tag,
+			WebRTCPort:    w.WebRTCPort,
+			Zone:          w.Zone,
 		}
 		if debug {
 			server.Room = w.RoomId
