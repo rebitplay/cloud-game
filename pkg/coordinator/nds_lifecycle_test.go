@@ -178,6 +178,58 @@ func TestNDSJournalWritesLiveRooms(t *testing.T) {
 	}
 }
 
+func TestNDSSaveUploadedWebhookIsDedupedBySeatSHA(t *testing.T) {
+	events := make(chan ndsWebhookPayload, 4)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var payload ndsWebhookPayload
+		if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+			t.Errorf("decode webhook: %v", err)
+		}
+		events <- payload
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	defer server.Close()
+	t.Setenv("NDS_WEBHOOK_URL", server.URL)
+
+	h := NewHub(config.CoordinatorConfig{}, logger.NewConsole(false, "test", false))
+	room := &ndsRoomSession{
+		createdAt: time.Now().UTC(),
+		players: map[int]*ndsSeat{
+			1: {player: 1, ref: "user_1", roomID: "room-123-p1___Tetris"},
+		},
+		roomID: "room-123",
+		state:  ndsRoomActive,
+	}
+	h.ndsRooms.put(room)
+
+	status := api.NDSSaveStatus{
+		FlushedAt: time.Now().UTC(),
+		Player:    1,
+		Ref:       "user_1",
+		RoomID:    "room-123-p1___Tetris",
+		SHA1:      "0123456789abcdef0123456789abcdef01234567",
+		Size:      12,
+		Status:    "uploaded",
+	}
+	h.recordNDSSaveStatus(status)
+	h.recordNDSSaveStatus(status)
+
+	select {
+	case event := <-events:
+		if event.Event != "save.uploaded" {
+			t.Fatalf("event = %q, want save.uploaded", event.Event)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for save.uploaded webhook")
+	}
+
+	select {
+	case event := <-events:
+		t.Fatalf("unexpected duplicate webhook: %#v", event)
+	case <-time.After(150 * time.Millisecond):
+	}
+}
+
 func TestNDSRoomCloseFlushesSavesAndReportsStatuses(t *testing.T) {
 	events := make(chan ndsWebhookPayload, 4)
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

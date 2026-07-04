@@ -52,20 +52,21 @@ type ndsRoomSession struct {
 }
 
 type ndsSeat struct {
-	connected     bool
-	connectedAt   *time.Time
-	lastSaveAt    *time.Time
-	lastSeen      *time.Time
-	player        int
-	ref           string
-	roomID        string
-	saveURL       string
-	saveSHA1      string
-	saveSize      int
-	saveStatus    string
-	saveUploadURL string
-	user          *User
-	worker        *Worker
+	connected       bool
+	connectedAt     *time.Time
+	lastSaveAt      *time.Time
+	lastSeen        *time.Time
+	player          int
+	ref             string
+	roomID          string
+	saveURL         string
+	saveWebhookSHA1 string
+	saveSHA1        string
+	saveSize        int
+	saveStatus      string
+	saveUploadURL   string
+	user            *User
+	worker          *Worker
 }
 
 type ndsUserSession struct {

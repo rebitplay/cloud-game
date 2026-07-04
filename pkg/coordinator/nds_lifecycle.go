@@ -272,10 +272,14 @@ func (h *Hub) recordNDSSaveStatus(status api.NDSSaveStatus) {
 	if status.Ref == "" {
 		status.Ref = seat.ref
 	}
+	emitUploaded := status.Status == "uploaded" && status.SHA1 != "" && status.SHA1 != seat.saveWebhookSHA1
+	if emitUploaded {
+		seat.saveWebhookSHA1 = status.SHA1
+	}
 	room.updatedAt = time.Now().UTC()
 	room.mu.Unlock()
 
-	if status.Status == "uploaded" && status.SHA1 != "" {
+	if emitUploaded {
 		h.emitNDSWebhook("save.uploaded", room, map[string]any{
 			"flushed_at": status.FlushedAt,
 			"player":     status.Player,
