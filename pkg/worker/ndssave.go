@@ -120,14 +120,13 @@ func (w *Worker) uploadNDSSaveRaw(upload *ndsSaveUpload, raw []byte) error {
 		upload.mu.Unlock()
 		return nil
 	}
-	upload.mu.Unlock()
 
 	if err := putNDSSave(upload.sess.SaveUploadURL, raw); err != nil {
 		monitoring.IncNDSSaveUploadFailure("put")
-		upload.setStatus("failed")
+		upload.status = "failed"
+		upload.mu.Unlock()
 		return err
 	}
-	upload.mu.Lock()
 	upload.lastSHA = sha
 	upload.lastSize = len(raw)
 	upload.flushedAt = time.Now().UTC()
