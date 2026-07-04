@@ -5,7 +5,7 @@
 Use the latest pushed image digest from the release you intend to test. Do not deploy a floating tag unless the platform records the resolved digest.
 
 ```text
-ghcr.io/rebitplay/cloud-game@sha256:50b31cd710b8cbb4218ffe45d8bc659841d4d3f34d887752e3b9424b740a150c
+ghcr.io/rebitplay/cloud-game@sha256:9e78dc8a5351902e0650f3b09a643bb53903e87c91ffefdbe29d93bfe76f3772
 ```
 
 Equivalent pushed tags are only for discovery; the Bunny deployment should be pinned to the digest that serves the expected `/buildz` version and WebRTC asset.
@@ -71,7 +71,7 @@ Then run the authenticated verifier:
 ```bash
 NDS_ENDPOINT=http://109.224.230.118:8000 \
 NDS_API_KEY="$NDS_API_KEY" \
-NDS_EXPECT_VERSION=82c04b2d-token-20260704094313 \
+NDS_EXPECT_VERSION=badf96e9-watermark-20260704111440 \
 NDS_EXPECT_PUBLIC_IP=109.224.230.118 \
 NDS_EXPECT_PUBLIC_PORT=8641 \
 NDS_REQUIRE_TURN=true \
@@ -249,6 +249,23 @@ Worker video frame metrics increase while rooms are active
 ```
 
 The automated browser latency values come from `requestVideoFrameCallback`: receive-to-display is `expectedDisplayTime - receiveTime`; watermark capture-to-display decodes the worker Unix-ms timestamp from presented pixels and compares it with browser display time adjusted by `/v1/time` clock sync; browser `captureTime` is retained as a fallback/source-specific field when exposed. Input timing is client input dispatch to the next presented video frame. This is stronger than WebRTC RTT and is suitable for automated regression gating, but a strict physical input-to-photon claim still needs a visual timing rig or a purpose-built latency ROM that changes pixels in response to the probe input.
+
+Latest M4 Bunny proof, captured against `badf96e9-watermark-20260704111440` on `2026-07-04`:
+
+```text
+Image tag: bunny-watermark-badf96e9-20260704111440
+Image digest: sha256:9e78dc8a5351902e0650f3b09a643bb53903e87c91ffefdbe29d93bfe76f3772
+Artifact: /tmp/nds-watermark-m4-30min-badf96e9.json
+Rooms/players/duration: 2 rooms x 4 players, 1820s including cleanup
+Join p95: 3873ms
+RTT p95: 54ms
+Receive-to-display p50/p95: 34.0ms / 44.7ms
+Watermark capture-to-display p50/p95: 59.3ms / 70.5ms
+Input dispatch to next frame p50: 24.8ms
+Active metrics: 2 active rooms, 8 connected seats, worker video frames +862465
+Recovery: capacity returned to 8 free rooms, connected seats returned to 0
+Failure deltas: 0 save-upload failures, 0 webhook retries
+```
 
 `cloud-game/scripts/nds-load-test.mjs` is kept as a direct protocol smoke harness for service debugging, but it should not be used as the final M4 SDK proof.
 
