@@ -28,6 +28,7 @@ func (h *Hub) recycleNDSGroup(groupID string) {
 
 	if managed && !h.draining.Load() {
 		if err := h.ndsSpawner.startGroup(h, groupID, h.ndsSpawner.playersPerGroup); err != nil {
+			h.ndsSpawner.releaseGroupID(groupID)
 			h.log.Warn().Err(err).Str("group", groupID).Msg("NDS worker group respawn failed")
 		}
 	}

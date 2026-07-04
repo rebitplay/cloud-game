@@ -162,6 +162,44 @@ func TestNDSV1CapacityIncludesDynamicSpawnableRooms(t *testing.T) {
 	}
 }
 
+func TestNDSSpawnerReleasedGroupRestoresCapacity(t *testing.T) {
+	spawner := &ndsSpawner{
+		enabled:   true,
+		maxGroups: 2,
+		nextGroup: 1,
+	}
+
+	groupID, err := spawner.allocateGroupID()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if groupID != "mkds-r1" {
+		t.Fatalf("allocated group = %q, want mkds-r1", groupID)
+	}
+	if remaining := spawner.remainingSpawnCapacity(); remaining != 1 {
+		t.Fatalf("remaining after allocation = %d, want 1", remaining)
+	}
+
+	spawner.releaseGroupID(groupID)
+	if remaining := spawner.remainingSpawnCapacity(); remaining != 2 {
+		t.Fatalf("remaining after release = %d, want 2", remaining)
+	}
+
+	reused, err := spawner.allocateGroupID()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if reused != "mkds-r1" {
+		t.Fatalf("reused group = %q, want mkds-r1", reused)
+	}
+
+	spawner.releaseGroupID(reused)
+	spawner.releaseGroupID(reused)
+	if remaining := spawner.remainingSpawnCapacity(); remaining != 2 {
+		t.Fatalf("duplicate release remaining = %d, want 2", remaining)
+	}
+}
+
 func TestCoordinatorPublicMetricsRoute(t *testing.T) {
 	t.Setenv("NDS_API_KEY", "test-key")
 	t.Setenv("NDS_PUBLIC_METRICS", "false")

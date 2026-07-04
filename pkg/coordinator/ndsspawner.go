@@ -6,6 +6,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -25,6 +26,7 @@ type ndsSpawner struct {
 	maxGroups       int
 	playersPerGroup int
 	nextGroup       int
+	freeGroups      []int
 	workerPath      string
 	coordinatorHost string
 	hubAddr         string
@@ -117,17 +119,54 @@ func (h *Hub) spawnNDSGroup(players int) error {
 }
 
 func (s *ndsSpawner) spawnGroup(h *Hub, players int) error {
+	groupID, err := s.allocateGroupID()
+	if err != nil {
+		return err
+	}
+
+	if err := s.startGroup(h, groupID, players); err != nil {
+		s.releaseGroupID(groupID)
+		return err
+	}
+
+	return nil
+}
+
+func (s *ndsSpawner) allocateGroupID() (string, error) {
 	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	if len(s.freeGroups) > 0 {
+		sort.Ints(s.freeGroups)
+		group := s.freeGroups[0]
+		s.freeGroups = s.freeGroups[1:]
+		return fmt.Sprintf("mkds-r%d", group), nil
+	}
+
 	if s.nextGroup > s.maxGroups {
-		s.mu.Unlock()
-		return apiConflict(fmt.Sprintf("dynamic NDS room capacity exhausted: max groups %d", s.maxGroups))
+		return "", apiConflict(fmt.Sprintf("dynamic NDS room capacity exhausted: max groups %d", s.maxGroups))
 	}
 
 	groupID := fmt.Sprintf("mkds-r%d", s.nextGroup)
 	s.nextGroup++
-	s.mu.Unlock()
+	return groupID, nil
+}
 
-	return s.startGroup(h, groupID, players)
+func (s *ndsSpawner) releaseGroupID(groupID string) {
+	group := groupNumber(groupID)
+	if group < 1 || group > s.maxGroups {
+		return
+	}
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	for _, free := range s.freeGroups {
+		if free == group {
+			return
+		}
+	}
+	s.freeGroups = append(s.freeGroups, group)
 }
 
 func (s *ndsSpawner) remainingSpawnCapacity() int {
@@ -136,9 +175,12 @@ func (s *ndsSpawner) remainingSpawnCapacity() int {
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	remaining := s.maxGroups - (s.nextGroup - 1)
+	remaining := s.maxGroups - (s.nextGroup - 1) + len(s.freeGroups)
 	if remaining < 0 {
 		return 0
+	}
+	if remaining > s.maxGroups {
+		return s.maxGroups
 	}
 	return remaining
 }
