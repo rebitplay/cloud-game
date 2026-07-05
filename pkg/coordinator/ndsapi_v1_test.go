@@ -378,6 +378,82 @@ func TestNDSV1CreateIsIdempotentAndUsesPublicEndpoint(t *testing.T) {
 	}
 }
 
+func TestNDSV1CreateUsesDefaultOptionsWhenMissingOrEmpty(t *testing.T) {
+	t.Setenv("NDS_API_KEY", "test-key")
+	t.Setenv("NDS_TOKEN_SECRET", "token-secret")
+	t.Setenv("NDS_PUBLIC_ENDPOINT", "https://sg-1.nds.rebitplay.com")
+
+	makeBody := func(t *testing.T, room string, includeOptions bool) []byte {
+		t.Helper()
+		payload := map[string]any{
+			"room":    room,
+			"players": 2,
+			"rom": map[string]any{
+				"name": "Tetris DS (USA).nds",
+				"sha1": "0123456789abcdef0123456789abcdef01234567",
+				"url":  "https://cdn.rebitplay.com/roms/tetris.nds?token=x",
+			},
+			"player_slots": []map[string]any{
+				{
+					"player":          1,
+					"ref":             "user_1",
+					"save_upload_url": "https://cdn.rebitplay.com/saves/u1.srm?token=x",
+				},
+				{
+					"player":          2,
+					"ref":             "user_2",
+					"save_upload_url": "https://cdn.rebitplay.com/saves/u2.srm?token=x",
+				},
+			},
+		}
+		if includeOptions {
+			payload["options"] = []any{}
+		}
+		body, err := json.Marshal(payload)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return body
+	}
+
+	for _, tt := range []struct {
+		name           string
+		room           string
+		includeOptions bool
+	}{
+		{name: "missing options", room: "room-defaults-missing"},
+		{name: "empty PHP array options", room: "room-defaults-empty", includeOptions: true},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			h := testNDSHub(t, 1)
+			created := postNDSRoom(t, h, makeBody(t, tt.room, tt.includeOptions))
+			if created.Code != http.StatusCreated {
+				t.Fatalf("create status = %d, want %d; body=%s", created.Code, http.StatusCreated, created.Body.String())
+			}
+
+			room := h.ndsRooms.get(tt.room)
+			if room == nil {
+				t.Fatal("room was not created")
+			}
+			room.mu.Lock()
+			idleTimeout := room.idleTimeout
+			joinTimeout := room.joinDeadline.Sub(room.createdAt)
+			maxDuration := room.maxDuration
+			room.mu.Unlock()
+
+			if idleTimeout != time.Duration(defaultNDSIdleTimeoutSec)*time.Second {
+				t.Fatalf("idle timeout = %s, want default", idleTimeout)
+			}
+			if joinTimeout != time.Duration(defaultNDSJoinTimeoutSec)*time.Second {
+				t.Fatalf("join timeout = %s, want default", joinTimeout)
+			}
+			if maxDuration != time.Duration(defaultNDSMaxDurationSec)*time.Second {
+				t.Fatalf("max duration = %s, want default", maxDuration)
+			}
+		})
+	}
+}
+
 func TestNDSV1CreateTokensCoverRoomDuration(t *testing.T) {
 	t.Setenv("NDS_API_KEY", "test-key")
 	t.Setenv("NDS_TOKEN_SECRET", "token-secret")

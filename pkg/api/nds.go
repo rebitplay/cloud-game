@@ -1,6 +1,10 @@
 package api
 
-import "time"
+import (
+	"bytes"
+	"encoding/json"
+	"time"
+)
 
 type (
 	NDSRoomCreateRequest struct {
@@ -137,3 +141,21 @@ type (
 		Status    string    `json:"status"`
 	}
 )
+
+func (o *NDSRoomOptions) UnmarshalJSON(data []byte) error {
+	trimmed := bytes.TrimSpace(data)
+	if len(trimmed) == 0 || bytes.Equal(trimmed, []byte("null")) || bytes.Equal(trimmed, []byte("[]")) {
+		*o = NDSRoomOptions{}
+		return nil
+	}
+
+	type ndsRoomOptions NDSRoomOptions
+	var parsed ndsRoomOptions
+	dec := json.NewDecoder(bytes.NewReader(trimmed))
+	dec.DisallowUnknownFields()
+	if err := dec.Decode(&parsed); err != nil {
+		return err
+	}
+	*o = NDSRoomOptions(parsed)
+	return nil
+}
