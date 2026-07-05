@@ -14,8 +14,8 @@ import (
 const (
 	maxMessageSize = 1 * 1024 * 1024
 	pingTime       = pongTime * 9 / 10
-	pongTime       = 7 * time.Second
-	writeWait      = 5 * time.Second
+	pongTime       = 120 * time.Second
+	writeWait      = 10 * time.Second
 )
 
 type Client struct {
@@ -162,6 +162,7 @@ func (c *Connection) reader() {
 			}
 			break
 		}
+		_ = c.conn.SetReadDeadline(time.Now().Add(pongTime))
 		c.callback(message, err)
 	}
 }
