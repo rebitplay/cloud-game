@@ -37,7 +37,6 @@ type preparedNDSSession struct {
 
 func (c *coordinator) HandleNDSRomInstall(rq api.NDSRomInstallRequest, w *Worker) api.Out {
 	fileName := games.NDSFileName(rq.URL, rq.FileName, "game.nds")
-	gameName := games.GameNameFromFile(fileName)
 	sha1Hex := strings.ToLower(strings.TrimSpace(rq.SHA1))
 	if sha1Hex == "" {
 		c.log.Error().Str("rom", fileName).Msg("NDS ROM SHA1 is required")
@@ -59,7 +58,7 @@ func (c *coordinator) HandleNDSRomInstall(rq api.NDSRomInstallRequest, w *Worker
 	c.SendPrevSessions(w)
 
 	return api.Out{Payload: api.NDSRomInstallResponse{
-		Game: gameName,
+		Game: strings.TrimSuffix(filepath.Base(relPath), filepath.Ext(relPath)),
 		Path: filepath.ToSlash(relPath),
 	}}
 }

@@ -46,7 +46,7 @@ func (f *fakeNDSConnection) Send(t api.PT, payload any) ([]byte, error) {
 			return nil, f.romInstallErr
 		}
 		req := payload.(api.NDSRomInstallRequest)
-		return json.Marshal(api.NDSRomInstallResponse{Game: "Tetris DS", Path: "nds/" + req.FileName})
+		return json.Marshal(api.NDSRomInstallResponse{Game: req.SHA1, Path: "nds/" + req.SHA1 + ".nds"})
 	case api.NDSSessionPrepare:
 		return json.Marshal(api.OK)
 	case api.NDSFlushSave:
@@ -361,9 +361,24 @@ func TestNDSV1CreateIsIdempotentAndUsesPublicEndpoint(t *testing.T) {
 	if len(firstResp.Players) != 3 {
 		t.Fatalf("players = %d, want 3", len(firstResp.Players))
 	}
+	if firstResp.Game != "Tetris DS (USA)" {
+		t.Fatalf("game = %q, want display name", firstResp.Game)
+	}
 	if !strings.HasPrefix(firstResp.Players[0].SignalingURL, "wss://sg-1.nds.rebitplay.com/ws?") {
 		t.Fatalf("signaling_url not built from NDS_PUBLIC_ENDPOINT: %q", firstResp.Players[0].SignalingURL)
 	}
+	room := h.ndsRooms.get(firstResp.RoomID)
+	if room == nil {
+		t.Fatal("room was not stored")
+	}
+	room.mu.Lock()
+	for _, seat := range room.players {
+		if !strings.HasSuffix(seat.roomID, "___0123456789abcdef0123456789abcdef01234567") {
+			room.mu.Unlock()
+			t.Fatalf("seat roomID = %q, want SHA1 launch key suffix", seat.roomID)
+		}
+	}
+	room.mu.Unlock()
 
 	second := postNDSRoom(t, h, body)
 	if second.Code != http.StatusOK {

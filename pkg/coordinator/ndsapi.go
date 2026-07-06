@@ -368,7 +368,8 @@ func (h *Hub) createNDSRoomV1(req api.NDSRoomCreateRequest) (api.NDSRoomV1Respon
 	}
 
 	fileName := games.NDSFileName(req.Rom.URL, req.Rom.Name, "game.nds")
-	gameName := games.GameNameFromFile(fileName)
+	displayGameName := games.GameNameFromFile(fileName)
+	launchGameName := strings.ToLower(strings.TrimSpace(req.Rom.SHA1))
 	roomID := req.Room
 	joinTimeout := req.Options.JoinTimeoutSec
 	if joinTimeout <= 0 {
@@ -383,12 +384,12 @@ func (h *Hub) createNDSRoomV1(req api.NDSRoomCreateRequest) (api.NDSRoomV1Respon
 		maxDuration = defaultNDSMaxDurationSec
 	}
 
-	reserved, groupID, err := h.reserveNDSGroup(req.Players, roomID, gameName)
+	reserved, groupID, err := h.reserveNDSGroup(req.Players, roomID, launchGameName)
 	if err != nil && isNDSCapacityConflict(err) {
 		if spawnErr := h.spawnNDSGroup(req.Players); spawnErr != nil {
 			return api.NDSRoomV1Response{}, 0, noCapacityAPIError("no free NDS worker groups")
 		}
-		reserved, groupID, err = h.reserveNDSGroup(req.Players, roomID, gameName)
+		reserved, groupID, err = h.reserveNDSGroup(req.Players, roomID, launchGameName)
 	}
 	if err != nil {
 		if isNDSCapacityConflict(err) {
@@ -405,11 +406,11 @@ func (h *Hub) createNDSRoomV1(req api.NDSRoomCreateRequest) (api.NDSRoomV1Respon
 	slots := playerSlotsByNumber(req.PlayerSlots)
 	failureSeats := makeNDSFailureSeats(reserved, slots)
 	failProvisioning := func(reason string) {
-		h.recordNDSProvisioningFailure(roomID, endpoint, gameName, groupID, failureSeats, reason, now)
+		h.recordNDSProvisioningFailure(roomID, endpoint, displayGameName, groupID, failureSeats, reason, now)
 	}
 
 	installReq := api.NDSRomInstallRequest{URL: req.Rom.URL, FileName: fileName, SHA1: strings.ToLower(req.Rom.SHA1)}
-	romPath := "nds/" + fileName
+	romPath := filepath.ToSlash(filepath.Join("nds", launchGameName+".nds"))
 	for _, slot := range reserved {
 		if !slot.stream {
 			continue
@@ -419,7 +420,6 @@ func (h *Hub) createNDSRoomV1(req api.NDSRoomCreateRequest) (api.NDSRoomV1Respon
 			failProvisioning("rom_install_failed")
 			return api.NDSRoomV1Response{}, 0, apiInternal(fmt.Sprintf("worker %s could not install ROM", slot.worker.Id().String()))
 		}
-		gameName = resp.Game
 		if resp.Path != "" {
 			romPath = resp.Path
 		}
@@ -463,7 +463,7 @@ func (h *Hub) createNDSRoomV1(req api.NDSRoomCreateRequest) (api.NDSRoomV1Respon
 	session := &ndsRoomSession{
 		createdAt:    now,
 		endpoint:     endpoint,
-		game:         gameName,
+		game:         displayGameName,
 		groupID:      groupID,
 		idleTimeout:  time.Duration(idleTimeout) * time.Second,
 		joinDeadline: now.Add(time.Duration(joinTimeout) * time.Second),
