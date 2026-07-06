@@ -6,6 +6,7 @@ import (
 )
 
 /*
+#include <stdbool.h>
 #include <stdint.h>
 #include "libretro.h"
 
@@ -17,6 +18,8 @@ void input_cache_set_keyboard_bulk(const uint8_t *keys, size_t count);
 void input_cache_set_mouse(int16_t dx, int16_t dy, uint8_t buttons);
 void input_cache_set_pointer(int16_t x, int16_t y, uint8_t pressed);
 void input_cache_clear(void);
+bool core_environment_cgo(unsigned cmd, void *data);
+int16_t core_input_state_cgo(unsigned port, unsigned device, unsigned index, unsigned id);
 */
 import "C"
 
@@ -24,6 +27,15 @@ const (
 	maxPort    = 4
 	numAxes    = 4
 	RetrokLast = int(C.RETROK_LAST)
+)
+
+const (
+	retroDeviceJoypad       = uint(C.RETRO_DEVICE_JOYPAD)
+	retroDeviceIDJoypadA    = uint(C.RETRO_DEVICE_ID_JOYPAD_A)
+	retroDeviceIDJoypadB    = uint(C.RETRO_DEVICE_ID_JOYPAD_B)
+	retroDeviceIDJoypadUp   = uint(C.RETRO_DEVICE_ID_JOYPAD_UP)
+	retroDeviceIDJoypadMask = uint(C.RETRO_DEVICE_ID_JOYPAD_MASK)
+	retroEnvInputBitmasks   = uint(C.RETRO_ENVIRONMENT_GET_INPUT_BITMASKS)
 )
 
 type Device byte
@@ -56,6 +68,18 @@ type InputState [maxPort]struct {
 	keys     uint32 // lower 16 bits used
 	axes     int64  // packed: [LX:16][LY:16][RX:16][RY:16]
 	triggers int32  // packed: [L2:16][R2:16]
+}
+
+func coreEnvironmentForTest(cmd uint) bool {
+	return bool(C.core_environment_cgo(C.uint(cmd), nil))
+}
+
+func coreInputStateForTest(port, device, index, id uint) int16 {
+	return int16(C.core_input_state_cgo(C.uint(port), C.uint(device), C.uint(index), C.uint(id)))
+}
+
+func inputCacheClearForTest() {
+	C.input_cache_clear()
 }
 
 // SetInput sets input state for a player.

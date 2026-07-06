@@ -235,7 +235,7 @@ bool core_environment_cgo(unsigned cmd, void *data) {
           return true;
           break;
         case RETRO_ENVIRONMENT_GET_INPUT_BITMASKS:
-          return false;
+          return true;
         case RETRO_ENVIRONMENT_SHUTDOWN:
           return false;
           break;
@@ -263,6 +263,9 @@ int16_t core_input_state_cgo(unsigned port, unsigned device, unsigned index, uns
 
     switch (device) {
         case RETRO_DEVICE_JOYPAD:
+            if (id == RETRO_DEVICE_ID_JOYPAD_MASK) {
+                return (int16_t)input_cache.buttons[port];
+            }
             return (int16_t)((input_cache.buttons[port] >> id) & 1);
 
         case RETRO_DEVICE_ANALOG:

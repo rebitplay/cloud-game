@@ -116,6 +116,32 @@ func TestInputState_SetInput(t *testing.T) {
 	}
 }
 
+func TestCoreInputStateJoypadMask(t *testing.T) {
+	inputCacheClearForTest()
+	defer inputCacheClearForTest()
+
+	buttons := uint32((1 << retroDeviceIDJoypadA) | (1 << retroDeviceIDJoypadUp))
+	state := InputState{}
+	state.SetInput(0, []byte{byte(buttons), byte(buttons >> 8)})
+	state.SyncToCache()
+
+	if !coreEnvironmentForTest(retroEnvInputBitmasks) {
+		t.Fatal("core environment did not advertise joypad bitmask support")
+	}
+
+	mask := uint16(coreInputStateForTest(0, retroDeviceJoypad, 0, retroDeviceIDJoypadMask))
+	if mask != uint16(buttons) {
+		t.Fatalf("joypad mask = %#04x, want %#04x", mask, buttons)
+	}
+
+	if got := coreInputStateForTest(0, retroDeviceJoypad, 0, retroDeviceIDJoypadA); got != 1 {
+		t.Fatalf("joypad A = %d, want 1", got)
+	}
+	if got := coreInputStateForTest(0, retroDeviceJoypad, 0, retroDeviceIDJoypadB); got != 0 {
+		t.Fatalf("joypad B = %d, want 0", got)
+	}
+}
+
 func TestInputState_AxisExtraction(t *testing.T) {
 	state := InputState{}
 	data := []byte{
