@@ -39,7 +39,7 @@ const (
 )
 
 var (
-	ndsRoomIDPattern = regexp.MustCompile(`^[a-z0-9-]{4,64}$`)
+	ndsRoomIDPattern = regexp.MustCompile(`^[a-z0-9-]{3,64}$`)
 	ndsSHA1Pattern   = regexp.MustCompile(`^[a-fA-F0-9]{40}$`)
 )
 
@@ -590,7 +590,7 @@ func (h *Hub) handleNDSRoomPlayerToken(w http.ResponseWriter, roomID string, pla
 
 func validateNDSRoomCreate(req api.NDSRoomCreateRequest) error {
 	if !ndsRoomIDPattern.MatchString(req.Room) {
-		return badAPIRequest("invalid_room", "room must match [a-z0-9-]{4,64}")
+		return badAPIRequest("invalid_room", "room must match [a-z0-9-]{3,64}")
 	}
 	if req.Players < 2 || req.Players > 4 {
 		return badAPIRequest("invalid_players", "players must be 2, 3, or 4")
@@ -766,7 +766,7 @@ func cleanNDSRoomID(room string) string {
 	if len(out) > 64 {
 		out = strings.Trim(out[:64], "-")
 	}
-	if len(out) < 4 {
+	if len(out) < 3 {
 		return ""
 	}
 	return out

@@ -549,7 +549,7 @@ func TestNDSV1CreateValidationAndCapacityErrors(t *testing.T) {
 		t.Fatalf("bad players status = %d, want %d", tooManyPlayers.Code, http.StatusBadRequest)
 	}
 
-	noCapacity := postNDSRoom(t, h, testNDSCreateBody("room-124", 2))
+	noCapacity := postNDSRoom(t, h, testNDSCreateBody("123", 2))
 	if noCapacity.Code != http.StatusServiceUnavailable {
 		t.Fatalf("no capacity status = %d, want %d; body=%s", noCapacity.Code, http.StatusServiceUnavailable, noCapacity.Body.String())
 	}
@@ -647,7 +647,7 @@ func TestNDSAPIRemoteURLAllowsPrivateWhenExplicitlyEnabled(t *testing.T) {
 
 func TestNDSV1AllowsBuiltinROMAndOptionalSaveUploadURL(t *testing.T) {
 	req := api.NDSRoomCreateRequest{
-		Room:    "room-123",
+		Room:    "123",
 		Players: 2,
 		Rom: api.NDSRomCreate{
 			Name: "Tetris-DS-(USA).nds",
