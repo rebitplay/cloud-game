@@ -13,7 +13,7 @@ concurrency:
 env:
   IMAGE_NAME: rebitplay/cloud-game
   BUNNY_APP_ID: 71qZ2gP10g3NCih
-  BUNNY_CONTAINER_ID: 71qZ2gP10g3NCih-1sNE
+  BUNNY_CONTAINER_NAME: Container-1
 
 jobs:
   deploy:
@@ -60,23 +60,9 @@ jobs:
         run: docker push ghcr.io/${{ env.IMAGE_NAME }}:${{ steps.tag.outputs.image_tag }}
 
       - name: Update Bunny container image
-        shell: bash
-        env:
-          BUNNY_API_KEY: ${{ secrets.BUNNYNET_API_KEY }}
-          IMAGE_TAG: ${{ steps.tag.outputs.image_tag }}
-        run: |
-          test -n "$BUNNY_API_KEY"
-          curl --fail --show-error --silent --request PATCH \
-            "https://api.bunny.net/mc/apps/${BUNNY_APP_ID}/containers/${BUNNY_CONTAINER_ID}" \
-            --header "AccessKey: ${BUNNY_API_KEY}" \
-            --header "Content-Type: application/json" \
-            --data "{\"imageTag\":\"${IMAGE_TAG}\"}"
-
-      - name: Deploy Bunny application
-        shell: bash
-        env:
-          BUNNY_API_KEY: ${{ secrets.BUNNYNET_API_KEY }}
-        run: |
-          curl --fail --show-error --silent --request POST \
-            "https://api.bunny.net/mc/apps/${BUNNY_APP_ID}/deploy" \
-            --header "AccessKey: ${BUNNY_API_KEY}"
+        uses: BunnyWay/actions/container-update-image@main
+        with:
+          app_id: ${{ env.BUNNY_APP_ID }}
+          api_key: ${{ secrets.BUNNYNET_API_KEY }}
+          container: ${{ env.BUNNY_CONTAINER_NAME }}
+          image_tag: ${{ steps.tag.outputs.image_tag }}
