@@ -43,17 +43,21 @@ jobs:
           echo "image_tag=${image_tag}" >> "$GITHUB_OUTPUT"
           echo "version=${short_sha}-rebit-${GITHUB_RUN_NUMBER}" >> "$GITHUB_OUTPUT"
 
-      - name: Build and push Bunny image
+      - name: Build Bunny image
         uses: docker/build-push-action@v6
         with:
           context: .
           target: bunny-magic
           platforms: linux/amd64
-          push: true
+          load: true
           provenance: false
           tags: ghcr.io/${{ env.IMAGE_NAME }}:${{ steps.tag.outputs.image_tag }}
           build-args: |
             VERSION=${{ steps.tag.outputs.version }}
+
+      - name: Push Bunny image
+        shell: bash
+        run: docker push ghcr.io/${{ env.IMAGE_NAME }}:${{ steps.tag.outputs.image_tag }}
 
       - name: Update Bunny container image
         shell: bash
