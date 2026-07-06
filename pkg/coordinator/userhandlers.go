@@ -55,7 +55,9 @@ func (u *User) HandleWebrtcSignal(rq api.WebrtcSignalUser) {
 func (u *User) HandleStartGame(rq api.GameStartUserRequest, conf config.CoordinatorConfig) {
 	if u.nds != nil {
 		rq.RoomId = u.nds.Seat.roomID
-		rq.PlayerIndex = u.nds.Player
+		// Each NDS cloud seat runs in its own worker, so controller input must
+		// target that worker's first local libretro port.
+		rq.PlayerIndex = 0
 		rq.GameName = ""
 	}
 

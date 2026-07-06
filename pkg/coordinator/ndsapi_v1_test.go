@@ -965,7 +965,7 @@ func TestNDSGameStartIgnoresForgedClientFields(t *testing.T) {
 	if conn.lastStart == nil {
 		t.Fatal("worker did not receive StartGame")
 	}
-	if conn.lastStart.Rid != internalRoomID || conn.lastStart.PlayerIndex != 2 || conn.lastStart.Game != "" {
+	if conn.lastStart.Rid != internalRoomID || conn.lastStart.PlayerIndex != 0 || conn.lastStart.Game != "" {
 		t.Fatalf("start request used forged fields: %#v", conn.lastStart)
 	}
 }
