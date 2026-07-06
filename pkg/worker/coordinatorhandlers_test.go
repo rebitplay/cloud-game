@@ -104,6 +104,25 @@ func TestNDSFirmwareNameAllowsSpacesAndCapsLength(t *testing.T) {
 	}
 }
 
+func TestPreparedNDSSessionKeepsPlayerNameUntilGameStart(t *testing.T) {
+	w := &Worker{}
+	w.prepared.sessions = map[string]preparedNDSSession{}
+	roomID := "room-123-p2___Tetris DS"
+
+	w.markPreparedSession(roomID, preparedNDSSession{Name: "meo Coa", Player: 2, Ref: "user_2"})
+
+	prepared, ok := w.consumePreparedSession(roomID)
+	if !ok {
+		t.Fatal("prepared NDS session was not found")
+	}
+	if prepared.Name != "meo Coa" || prepared.Player != 2 || prepared.Ref != "user_2" {
+		t.Fatalf("prepared session = %#v", prepared)
+	}
+	if _, ok := w.consumePreparedSession(roomID); ok {
+		t.Fatal("prepared NDS session should be consumed only once")
+	}
+}
+
 func TestRemoveUserFromActiveNDSRoomKeepsEmulatorRunning(t *testing.T) {
 	w, user, app := testWorkerWithRoom("room-123-p1___Tetris DS")
 	w.markActiveNDSRoom(user.RoomId, preparedNDSSession{Player: 1, Ref: "user_1"})
