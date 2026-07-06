@@ -158,6 +158,7 @@ func (h *Hub) finishNDSRoomClose(room *ndsRoomSession, reason string) *ndsRoomSe
 	for _, user := range users {
 		user.Disconnect()
 	}
+	closeNDSWorkerRooms(room.reserved)
 	releaseNDSReservations(room.reserved)
 	h.recycleNDSGroup(room.groupID)
 
@@ -171,6 +172,14 @@ func (h *Hub) finishNDSRoomClose(room *ndsRoomSession, reason string) *ndsRoomSe
 	h.emitNDSWebhook("room.closed", room, h.ndsRoomClosedExtra(room, reason))
 	h.writeNDSJournal()
 	return room
+}
+
+func closeNDSWorkerRooms(reserved []reservedNDSWorker) {
+	for _, slot := range reserved {
+		if slot.stream && slot.worker != nil {
+			slot.worker.CloseGameRoom(slot.roomID)
+		}
+	}
 }
 
 func flushNDSSeatSave(seat *ndsSeat) api.NDSSaveStatus {

@@ -29,6 +29,7 @@ const (
 )
 
 type preparedNDSSession struct {
+	Name          string
 	Player        int
 	Ref           string
 	SaveURL       string
@@ -119,6 +120,7 @@ func (c *coordinator) HandleNDSSessionPrepare(rq api.NDSSessionPrepareRequest, w
 		}
 	}
 	w.markPreparedSession(rq.RoomID, preparedNDSSession{
+		Name:          rq.Name,
 		Player:        rq.Player,
 		Ref:           rq.Ref,
 		SaveURL:       rq.SaveURL,
@@ -183,6 +185,28 @@ func (w *Worker) consumePreparedSession(roomID string) (preparedNDSSession, bool
 	}
 	delete(w.prepared.sessions, roomID)
 	return session, true
+}
+
+func (w *Worker) markActiveNDSRoom(roomID string, session preparedNDSSession) {
+	w.activeNDS.mu.Lock()
+	if w.activeNDS.rooms == nil {
+		w.activeNDS.rooms = map[string]preparedNDSSession{}
+	}
+	w.activeNDS.rooms[roomID] = session
+	w.activeNDS.mu.Unlock()
+}
+
+func (w *Worker) clearActiveNDSRoom(roomID string) {
+	w.activeNDS.mu.Lock()
+	delete(w.activeNDS.rooms, roomID)
+	w.activeNDS.mu.Unlock()
+}
+
+func (w *Worker) isActiveNDSRoom(roomID string) bool {
+	w.activeNDS.mu.RLock()
+	_, ok := w.activeNDS.rooms[roomID]
+	w.activeNDS.mu.RUnlock()
+	return ok
 }
 
 func downloadURLToFile(rawURL string, path string, limit int64) error {

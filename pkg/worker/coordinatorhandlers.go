@@ -73,6 +73,34 @@ func isLoopbackMonitoringHost(host string) bool {
 		strings.HasSuffix(host, ".localhost")
 }
 
+func ndsFirmwareName(candidates ...string) string {
+	for _, candidate := range candidates {
+		candidate = strings.TrimSpace(candidate)
+		if candidate == "" {
+			continue
+		}
+
+		var out strings.Builder
+		count := 0
+		for _, r := range candidate {
+			if r < 32 || r == 127 {
+				continue
+			}
+			out.WriteRune(r)
+			count++
+			if count >= 10 {
+				break
+			}
+		}
+
+		if name := strings.TrimSpace(out.String()); name != "" {
+			return name
+		}
+	}
+
+	return ""
+}
+
 func (c *coordinator) HandleInitWebrtcStream(rq api.InitWebrtcStreamRequest, w *Worker, factory *webrtc.ApiFactory) api.Out {
 	var err error
 	defer func() {
@@ -178,6 +206,11 @@ func (c *coordinator) HandleGameStart(rq api.StartGameRequest, w *Worker) api.Ou
 		app.SetSessionId(uid)
 		prepared, hasPrepared := w.consumePreparedSession(uid)
 		app.SetSaveOnClose(true)
+		if hasPrepared {
+			if name := ndsFirmwareName(prepared.Name, "Player"+strconv.Itoa(prepared.Player)); name != "" {
+				app.SetCoreOption(game.System, "melonds_firmware_username", name)
+			}
+		}
 		if !hasPrepared || prepared.SaveUploadURL == "" {
 			app.EnableCloudStorage(uid, w.storage)
 		}
@@ -250,6 +283,9 @@ func (c *coordinator) HandleGameStart(rq api.StartGameRequest, w *Worker) api.Ou
 
 		r.InitMedia()
 		r.StartApp()
+		if hasPrepared {
+			w.markActiveNDSRoom(uid, prepared)
+		}
 		if hasPrepared && prepared.SaveUploadURL != "" {
 			w.startNDSSaveUpload(uid, app, prepared)
 		}
@@ -302,6 +338,36 @@ func (c *coordinator) HandleGameStart(rq api.StartGameRequest, w *Worker) api.Ou
 	return api.Out{Payload: response}
 }
 
+func closeWorkerRoom(w *Worker, r *room.Room[*room.GameSession], roomID string) {
+	if r == nil {
+		return
+	}
+	if roomID == "" {
+		roomID = r.Id()
+	}
+	if roomID != "" {
+		w.flushNDSSaveUpload(roomID)
+		w.stopNDSSaveUpload(roomID)
+		w.clearActiveNDSRoom(roomID)
+	}
+	r.Close()
+	w.router.SetRoom(nil)
+}
+
+func closeWorkerRoomByID(w *Worker, roomID string) bool {
+	if roomID == "" {
+		return false
+	}
+	r := w.router.FindRoom(roomID)
+	if r == nil {
+		w.stopNDSSaveUpload(roomID)
+		w.clearActiveNDSRoom(roomID)
+		return false
+	}
+	closeWorkerRoom(w, r, roomID)
+	return true
+}
+
 func handleWebRTCControl(data []byte, roomID string, sess room.Session, w *Worker) bool {
 	var packet struct {
 		T       api.PT          `json:"t"`
@@ -334,41 +400,60 @@ func handleWebRTCControl(data []byte, roomID string, sess room.Session, w *Worke
 	}
 }
 
-func removeUserFromRoom(w *Worker, user *room.GameSession) {
+func removeUserFromRoom(w *Worker, user *room.GameSession) bool {
 	if user.RoomId == "" {
-		return
+		return false
 	}
 
 	r := w.router.FindRoom(user.RoomId)
 	if r == nil {
 		user.RoomId = ""
-		return
+		return false
 	}
 
+	roomID := user.RoomId
 	user.RoomId = ""
-	w.flushNDSSaveUpload(r.Id())
+	w.flushNDSSaveUpload(roomID)
 	if left := r.RemoveUser(user); left == 0 {
-		w.stopNDSSaveUpload(r.Id())
-		r.Close()
-		w.router.SetRoom(nil)
+		if w.isActiveNDSRoom(roomID) {
+			return true
+		}
+		closeWorkerRoom(w, r, roomID)
 	}
+	return false
+}
+
+func removeUserFromRouter(w *Worker, user *room.GameSession, keepRoom bool) {
+	if keepRoom {
+		w.router.Users().RemoveL(user)
+		return
+	}
+	w.router.Remove(user)
 }
 
 // HandleTerminateSession handles cases when a user has been disconnected from the websocket of coordinator.
 func (c *coordinator) HandleTerminateSession(rq api.TerminateSessionRequest, w *Worker) {
 	if user := w.router.FindUser(rq.Id); user != nil {
-		removeUserFromRoom(w, user)
-		w.router.Remove(user)
+		keepRoom := removeUserFromRoom(w, user)
+		removeUserFromRouter(w, user, keepRoom)
 		user.Disconnect()
 	}
 }
 
 // HandleQuitGame handles cases when a user manually exits the game.
-func (c *coordinator) HandleQuitGame(rq api.GameQuitRequest, w *Worker) {
-	if user := w.router.FindUser(rq.Id); user != nil {
-		removeUserFromRoom(w, user)
-		w.router.Remove(user)
+func (c *coordinator) HandleQuitGame(rq api.GameQuitRequest, w *Worker) api.Out {
+	if rq.Id == "" {
+		if closeWorkerRoomByID(w, rq.Rid) {
+			return api.OkPacket
+		}
+		return api.ErrPacket
 	}
+	if user := w.router.FindUser(rq.Id); user != nil {
+		keepRoom := removeUserFromRoom(w, user)
+		removeUserFromRouter(w, user, keepRoom)
+		return api.OkPacket
+	}
+	return api.ErrPacket
 }
 
 func (c *coordinator) HandleResetGame(rq api.ResetGameRequest, w *Worker) api.Out {

@@ -56,6 +56,7 @@ type ndsSeat struct {
 	connectedAt     *time.Time
 	lastSaveAt      *time.Time
 	lastSeen        *time.Time
+	name            string
 	player          int
 	ref             string
 	roomID          string
@@ -129,6 +130,7 @@ func (s *ndsRoomSession) response(ice []config.IceServer, now time.Time) (api.ND
 		}
 		players = append(players, api.NDSPlayerJoinInfo{
 			IceServers:   ndsIceServers(ice, s.roomID, seat.player, expiresAt),
+			Name:         seat.name,
 			Player:       seat.player,
 			Ref:          seat.ref,
 			SignalingURL: ndsSignalingURL(s.endpoint, token),
@@ -160,6 +162,7 @@ func (s *ndsRoomSession) tokenResponse(player int, ice []config.IceServer, now t
 	}
 	return api.NDSPlayerJoinInfo{
 		IceServers:   ndsIceServers(ice, s.roomID, seat.player, expiresAt),
+		Name:         seat.name,
 		Player:       seat.player,
 		Ref:          seat.ref,
 		SignalingURL: ndsSignalingURL(s.endpoint, token),
@@ -194,6 +197,7 @@ func (s *ndsRoomSession) stateResponse() api.NDSRoomStateResponse {
 			ConnectedAt: seat.connectedAt,
 			LastSaveAt:  seat.lastSaveAt,
 			LastSeen:    seat.lastSeen,
+			Name:        seat.name,
 			Player:      seat.player,
 			Ref:         seat.ref,
 			SaveStatus:  seat.saveStatus,

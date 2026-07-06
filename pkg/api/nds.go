@@ -31,6 +31,7 @@ type (
 	NDSPlayerSlotCreate struct {
 		Player        int    `json:"player"`
 		Ref           string `json:"ref"`
+		Name          string `json:"name,omitempty"`
 		SaveURL       string `json:"save_url,omitempty"`
 		SaveUploadURL string `json:"save_upload_url"`
 	}
@@ -68,6 +69,7 @@ type (
 
 	NDSPlayerJoinInfo struct {
 		IceServers   []IceServer `json:"ice_servers"`
+		Name         string      `json:"name,omitempty"`
 		Player       int         `json:"player"`
 		Ref          string      `json:"ref"`
 		SignalingURL string      `json:"signaling_url"`
@@ -91,6 +93,7 @@ type (
 		ConnectedAt *time.Time `json:"connected_at,omitempty"`
 		LastSaveAt  *time.Time `json:"last_save_at,omitempty"`
 		LastSeen    *time.Time `json:"last_seen,omitempty"`
+		Name        string     `json:"name,omitempty"`
 		Player      int        `json:"player"`
 		Ref         string     `json:"ref"`
 		SaveStatus  string     `json:"save_status,omitempty"`
@@ -120,6 +123,7 @@ type (
 	}
 
 	NDSSessionPrepareRequest struct {
+		Name          string `json:"name,omitempty"`
 		Player        int    `json:"player,omitempty"`
 		Ref           string `json:"ref,omitempty"`
 		RoomID        string `json:"room_id"`

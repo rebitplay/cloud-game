@@ -99,6 +99,11 @@ func (c *Caged) PointerSupport() bool             { return c.base.PointerSupport
 func (c *Caged) Start()                           { go c.Emulator.Start() }
 func (c *Caged) SetSaveOnClose(v bool)            { c.base.SaveOnClose = v }
 func (c *Caged) SetSessionId(name string)         { c.base.SetSessionId(name) }
-func (c *Caged) SaveSRAMRaw() ([]byte, error)     { return c.Emulator.SaveSRAMRaw() }
-func (c *Caged) Close()                           { c.Emulator.Close() }
-func (c *Caged) IsSupported() error               { return c.base.IsSupported() }
+func (c *Caged) SetCoreOption(emu string, key string, value string) {
+	if c.base != nil {
+		c.base.SetCoreOption(emu, key, value)
+	}
+}
+func (c *Caged) SaveSRAMRaw() ([]byte, error) { return c.Emulator.SaveSRAMRaw() }
+func (c *Caged) Close()                       { c.Emulator.Close() }
+func (c *Caged) IsSupported() error           { return c.base.IsSupported() }

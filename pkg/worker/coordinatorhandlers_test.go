@@ -3,10 +3,43 @@ package worker
 import (
 	"strings"
 	"testing"
+	"time"
 
+	"github.com/giongto35/cloud-game/v3/pkg/api"
 	"github.com/giongto35/cloud-game/v3/pkg/com"
 	"github.com/giongto35/cloud-game/v3/pkg/config"
+	cagedapp "github.com/giongto35/cloud-game/v3/pkg/worker/caged/app"
+	"github.com/giongto35/cloud-game/v3/pkg/worker/room"
 )
+
+type testWorkerSession struct{}
+
+func (s *testWorkerSession) Disconnect()                     {}
+func (s *testWorkerSession) SendAudio([]byte, time.Duration) {}
+func (s *testWorkerSession) SendVideo([]byte, time.Duration) {}
+func (s *testWorkerSession) SendData([]byte)                 {}
+
+type testWorkerApp struct {
+	closed bool
+}
+
+func (a *testWorkerApp) AudioSampleRate() int            { return 44100 }
+func (a *testWorkerApp) AspectRatio() float32            { return 1 }
+func (a *testWorkerApp) AspectEnabled() bool             { return false }
+func (a *testWorkerApp) Flipped() bool                   { return false }
+func (a *testWorkerApp) Init() error                     { return nil }
+func (a *testWorkerApp) ViewportSize() (int, int)        { return 256, 192 }
+func (a *testWorkerApp) Scale() (float64, string)        { return 1, "" }
+func (a *testWorkerApp) Rotation() uint                  { return 0 }
+func (a *testWorkerApp) PixFormat() uint32               { return 0 }
+func (a *testWorkerApp) Start()                          {}
+func (a *testWorkerApp) Close()                          { a.closed = true }
+func (a *testWorkerApp) SetAudioCb(func(cagedapp.Audio)) {}
+func (a *testWorkerApp) SetVideoCb(func(cagedapp.Video)) {}
+func (a *testWorkerApp) SetDataCb(func([]byte))          {}
+func (a *testWorkerApp) Input(int, byte, []byte)         {}
+func (a *testWorkerApp) KbMouseSupport() bool            { return false }
+func (a *testWorkerApp) PointerSupport() bool            { return false }
 
 func TestWorkerMonitoringURLUsesLoopbackForWildcardAddress(t *testing.T) {
 	var conf config.Worker
@@ -57,4 +90,68 @@ func TestBuildConnQueryAdvertisesMonitoringURL(t *testing.T) {
 	if !strings.Contains(raw, `"monitoring_url":"http://127.0.0.1:6621/worker/metrics"`) {
 		t.Fatalf("handshake did not include monitoring URL: %s", raw)
 	}
+}
+
+func TestNDSFirmwareNameAllowsSpacesAndCapsLength(t *testing.T) {
+	got := ndsFirmwareName("  meo Coa Long Name  ")
+	if got != "meo Coa Lo" {
+		t.Fatalf("nds firmware name = %q, want capped name with space", got)
+	}
+
+	got = ndsFirmwareName("\n\t", "Player2")
+	if got != "Player2" {
+		t.Fatalf("nds firmware fallback name = %q, want Player2", got)
+	}
+}
+
+func TestRemoveUserFromActiveNDSRoomKeepsEmulatorRunning(t *testing.T) {
+	w, user, app := testWorkerWithRoom("room-123-p1___Tetris DS")
+	w.markActiveNDSRoom(user.RoomId, preparedNDSSession{Player: 1, Ref: "user_1"})
+
+	keepRoom := removeUserFromRoom(w, user)
+	removeUserFromRouter(w, user, keepRoom)
+
+	if !keepRoom {
+		t.Fatal("removeUserFromRoom did not mark active NDS room for retention")
+	}
+	if app.closed {
+		t.Fatal("active NDS emulator was closed after one browser disconnected")
+	}
+	if got := w.router.FindRoom("room-123-p1___Tetris DS"); got == nil {
+		t.Fatal("active NDS worker room was removed after one browser disconnected")
+	}
+}
+
+func TestExplicitQuitClosesActiveNDSRoom(t *testing.T) {
+	w, user, app := testWorkerWithRoom("room-123-p1___Tetris DS")
+	w.markActiveNDSRoom(user.RoomId, preparedNDSSession{Player: 1, Ref: "user_1"})
+
+	out := (&coordinator{}).HandleQuitGame(api.GameQuitRequest{Rid: user.RoomId}, w)
+
+	if out.Payload != api.OK {
+		t.Fatalf("explicit close response = %#v, want %q", out.Payload, api.OK)
+	}
+	if !app.closed {
+		t.Fatal("explicit NDS room close did not close emulator")
+	}
+	if got := w.router.FindRoom("room-123-p1___Tetris DS"); got != nil {
+		t.Fatal("explicit NDS room close left worker room registered")
+	}
+	if w.isActiveNDSRoom("room-123-p1___Tetris DS") {
+		t.Fatal("explicit NDS room close left active NDS marker")
+	}
+}
+
+func testWorkerWithRoom(roomID string) (*Worker, *room.GameSession, *testWorkerApp) {
+	router := room.NewGameRouter()
+	users := com.NewNetMap[room.SessionKey, *room.GameSession]()
+	app := &testWorkerApp{}
+	r := room.NewRoom(roomID, app, &users, nil)
+	user := room.NewGameSession("user-1", &testWorkerSession{})
+	user.RoomId = roomID
+	r.AddUser(user)
+	router.SetRoom(r)
+	router.AddUser(user)
+
+	return &Worker{router: router}, user, app
 }

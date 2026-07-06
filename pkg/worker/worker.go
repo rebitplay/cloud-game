@@ -29,6 +29,10 @@ type Worker struct {
 		mu       sync.RWMutex
 		sessions map[string]preparedNDSSession
 	}
+	activeNDS struct {
+		mu    sync.RWMutex
+		rooms map[string]preparedNDSSession
+	}
 	saveUploads struct {
 		mu      sync.Mutex
 		uploads map[string]*ndsSaveUpload
@@ -58,6 +62,7 @@ func New(conf config.WorkerConfig, log *logger.Logger) (*Worker, error) {
 		router:   room.NewGameRouter(),
 	}
 	worker.prepared.sessions = map[string]preparedNDSSession{}
+	worker.activeNDS.rooms = map[string]preparedNDSSession{}
 	worker.saveUploads.uploads = map[string]*ndsSaveUpload{}
 
 	h, err := httpx.NewServer(

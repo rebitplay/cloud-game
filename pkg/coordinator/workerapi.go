@@ -28,6 +28,10 @@ func (w *Worker) QuitGame(id string) {
 	w.Notify(api.QuitGame, api.GameQuitRequest{Id: id, Rid: w.RoomId})
 }
 
+func (w *Worker) CloseGameRoom(roomID string) {
+	_, _ = w.Send(api.QuitGame, api.GameQuitRequest{Rid: roomID})
+}
+
 func (w *Worker) SaveGame(id string) (*api.SaveGameResponse, error) {
 	return api.UnwrapChecked[api.SaveGameResponse](
 		w.Send(api.SaveGame, api.SaveGameRequest{Id: id, Rid: w.RoomId}))

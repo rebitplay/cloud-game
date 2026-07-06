@@ -205,6 +205,22 @@ func (f *Frontend) LoadCore(emu string) {
 	f.mu.Unlock()
 }
 
+func (f *Frontend) SetCoreOption(emu string, key string, value string) {
+	if key == "" {
+		return
+	}
+
+	f.mu.Lock()
+	defer f.mu.Unlock()
+
+	conf := f.conf.Libretro.Cores.List[emu]
+	if conf.Options == nil {
+		conf.Options = map[string]string{}
+	}
+	conf.Options[key] = value
+	f.conf.Libretro.Cores.List[emu] = conf
+}
+
 func (f *Frontend) handleAudio(audio unsafe.Pointer, samples int) {
 	fr, _ := audioPool.Get().(*app.Audio)
 	if fr == nil {

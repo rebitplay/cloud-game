@@ -89,7 +89,7 @@ func (c *coordinator) HandleRequests(w *Worker) chan struct{} {
 		case api.TerminateSession:
 			err = api.Do(x, func(d api.TerminateSessionRequest) { c.HandleTerminateSession(d, w) })
 		case api.QuitGame:
-			err = api.Do(x, func(d api.GameQuitRequest) { c.HandleQuitGame(d, w) })
+			err = api.Do(x, func(d api.GameQuitRequest) { out = c.HandleQuitGame(d, w) })
 		case api.ResetGame:
 			err = api.Do(x, func(d api.ResetGameRequest) { c.HandleResetGame(d, w) })
 		case api.NDSRomInstall:

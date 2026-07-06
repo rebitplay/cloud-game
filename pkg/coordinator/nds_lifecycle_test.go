@@ -247,7 +247,7 @@ func TestNDSRoomCloseFlushesSavesAndReportsStatuses(t *testing.T) {
 	startedAt := time.Now().UTC().Add(-5 * time.Second)
 	flushedAt := time.Now().UTC()
 	internalRoomID := "room-123-p1___Tetris DS"
-	worker := &Worker{Connection: &fakeNDSConnection{
+	conn := &fakeNDSConnection{
 		id: com.NewUid(),
 		flushStatus: &api.NDSSaveStatus{
 			FlushedAt: flushedAt,
@@ -258,11 +258,15 @@ func TestNDSRoomCloseFlushesSavesAndReportsStatuses(t *testing.T) {
 			Size:      12,
 			Status:    "uploaded",
 		},
-	}}
+	}
+	worker := &Worker{Connection: conn}
 	room := &ndsRoomSession{
 		createdAt: time.Now().UTC().Add(-10 * time.Second),
 		players: map[int]*ndsSeat{
 			1: {player: 1, ref: "user_1", roomID: internalRoomID, saveStatus: "unchanged", worker: worker},
+		},
+		reserved: []reservedNDSWorker{
+			{player: 1, roomID: internalRoomID, stream: true, worker: worker},
 		},
 		roomID:    "room-123",
 		startedAt: &startedAt,
@@ -299,6 +303,9 @@ func TestNDSRoomCloseFlushesSavesAndReportsStatuses(t *testing.T) {
 	}
 	if got := h.ndsRooms.get("room-123").players[1].saveStatus; got != "uploaded" {
 		t.Fatalf("stored save status = %q, want uploaded", got)
+	}
+	if len(conn.quitRequests) != 1 || conn.quitRequests[0].Rid != internalRoomID || conn.quitRequests[0].Id != "" {
+		t.Fatalf("worker close requests = %#v, want one explicit room close for %q", conn.quitRequests, internalRoomID)
 	}
 }
 

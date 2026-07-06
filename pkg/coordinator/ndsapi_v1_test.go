@@ -27,7 +27,9 @@ type fakeNDSConnection struct {
 	flushStarted  chan<- string
 	flushStatus   *api.NDSSaveStatus
 	id            com.Uid
+	lastPrepare   *api.NDSSessionPrepareRequest
 	lastStart     *api.StartGameRequest
+	quitRequests  []api.GameQuitRequest
 	romInstallErr error
 }
 
@@ -48,6 +50,8 @@ func (f *fakeNDSConnection) Send(t api.PT, payload any) ([]byte, error) {
 		req := payload.(api.NDSRomInstallRequest)
 		return json.Marshal(api.NDSRomInstallResponse{Game: req.SHA1, Path: "nds/" + req.SHA1 + ".nds"})
 	case api.NDSSessionPrepare:
+		req := payload.(api.NDSSessionPrepareRequest)
+		f.lastPrepare = &req
 		return json.Marshal(api.OK)
 	case api.NDSFlushSave:
 		if f.flushStarted != nil {
@@ -69,6 +73,10 @@ func (f *fakeNDSConnection) Send(t api.PT, payload any) ([]byte, error) {
 			Room:    api.Room{Rid: req.Rid},
 			Pointer: true,
 		})
+	case api.QuitGame:
+		req := payload.(api.GameQuitRequest)
+		f.quitRequests = append(f.quitRequests, req)
+		return json.Marshal(api.OK)
 	default:
 		return json.Marshal(api.OK)
 	}
@@ -361,6 +369,9 @@ func TestNDSV1CreateIsIdempotentAndUsesPublicEndpoint(t *testing.T) {
 	if len(firstResp.Players) != 3 {
 		t.Fatalf("players = %d, want 3", len(firstResp.Players))
 	}
+	if firstResp.Players[1].Name != "Player 2" {
+		t.Fatalf("player 2 name = %q, want Player 2", firstResp.Players[1].Name)
+	}
 	if firstResp.Game != "Tetris DS (USA)" {
 		t.Fatalf("game = %q, want display name", firstResp.Game)
 	}
@@ -376,6 +387,16 @@ func TestNDSV1CreateIsIdempotentAndUsesPublicEndpoint(t *testing.T) {
 		if !strings.HasSuffix(seat.roomID, "___0123456789abcdef0123456789abcdef01234567") {
 			room.mu.Unlock()
 			t.Fatalf("seat roomID = %q, want SHA1 launch key suffix", seat.roomID)
+		}
+		wantName := "Player " + strconv.Itoa(seat.player)
+		if seat.name != wantName {
+			room.mu.Unlock()
+			t.Fatalf("seat %d name = %q, want %q", seat.player, seat.name, wantName)
+		}
+		conn, ok := seat.worker.Connection.(*fakeNDSConnection)
+		if !ok || conn.lastPrepare == nil || conn.lastPrepare.Name != wantName {
+			room.mu.Unlock()
+			t.Fatalf("worker prepare for seat %d did not receive name %q", seat.player, wantName)
 		}
 	}
 	room.mu.Unlock()
@@ -1000,6 +1021,7 @@ func testNDSCreateBody(room string, players int) []byte {
 	}
 	for player := 1; player <= players && player <= 4; player++ {
 		req.PlayerSlots = append(req.PlayerSlots, api.NDSPlayerSlotCreate{
+			Name:          "Player " + strconv.Itoa(player),
 			Player:        player,
 			Ref:           "user_" + strconv.Itoa(player),
 			SaveUploadURL: "https://cdn.rebitplay.com/saves/u" + strconv.Itoa(player) + ".srm?token=x",

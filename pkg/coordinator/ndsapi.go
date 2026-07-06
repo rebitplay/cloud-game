@@ -431,6 +431,7 @@ func (h *Hub) createNDSRoomV1(req api.NDSRoomCreateRequest) (api.NDSRoomV1Respon
 		}
 		saveURL := slots[slot.player].SaveURL
 		resp, err := slot.worker.PrepareNDSSession(api.NDSSessionPrepareRequest{
+			Name:          slots[slot.player].Name,
 			Player:        slot.player,
 			Ref:           slots[slot.player].Ref,
 			RoomID:        slot.roomID,
@@ -450,6 +451,7 @@ func (h *Hub) createNDSRoomV1(req api.NDSRoomCreateRequest) (api.NDSRoomV1Respon
 		}
 		slotReq := slots[slot.player]
 		players[slot.player] = &ndsSeat{
+			name:          slotReq.Name,
 			player:        slot.player,
 			ref:           slotReq.Ref,
 			roomID:        slot.roomID,
@@ -495,6 +497,7 @@ func makeNDSFailureSeats(reserved []reservedNDSWorker, slots map[int]api.NDSPlay
 		}
 		req := slots[slot.player]
 		players[slot.player] = &ndsSeat{
+			name:          req.Name,
 			player:        slot.player,
 			ref:           req.Ref,
 			roomID:        slot.roomID,
@@ -735,6 +738,7 @@ func makeDemoPlayerSlots(roomID string, players int, saves []api.NDSPlayerSaveRe
 	slots := make([]api.NDSPlayerSlotCreate, 0, players)
 	for player := 1; player <= players; player++ {
 		slots = append(slots, api.NDSPlayerSlotCreate{
+			Name:    "Player " + strconv.Itoa(player),
 			Player:  player,
 			Ref:     fmt.Sprintf("%s-p%d", roomID, player),
 			SaveURL: saveURLs[player],
@@ -844,6 +848,7 @@ func publicBaseURL(r *http.Request, override string) string {
 func playerSlotsByNumber(slots []api.NDSPlayerSlotCreate) map[int]api.NDSPlayerSlotCreate {
 	out := make(map[int]api.NDSPlayerSlotCreate, len(slots))
 	for _, slot := range slots {
+		slot.Name = strings.TrimSpace(slot.Name)
 		slot.Ref = strings.TrimSpace(slot.Ref)
 		slot.SaveURL = strings.TrimSpace(slot.SaveURL)
 		slot.SaveUploadURL = strings.TrimSpace(slot.SaveUploadURL)
