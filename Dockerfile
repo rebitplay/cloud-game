@@ -77,7 +77,7 @@ RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
     apt-get -q update && apt-get -q install --no-install-recommends -y \
     ca-certificates \
     make \
-    upx && \
+    upx-ucl && \
     rm -rf /var/lib/apt/lists/*
 ENV PATH="${PATH}:/usr/local/go/bin"
 
