@@ -262,7 +262,12 @@ func (c *coordinator) HandleGameStart(rq api.StartGameRequest, w *Worker) api.Ou
 	r.AddUser(user)
 
 	s := room.WithWebRTC(user.Session)
-	s.OnMessage(func(data []byte) { r.App().Input(user.Index, byte(caged.RetroPad), data) })
+	s.OnMessage(func(data []byte) {
+		if handleWebRTCControl(data, r.Id(), s, w) {
+			return
+		}
+		r.App().Input(user.Index, byte(caged.RetroPad), data)
+	})
 	if needsKbMouse {
 		_, _ = s.Channel("keyboard", nil, func(data []byte) { r.App().Input(user.Index, byte(caged.Keyboard), data) })
 		_, _ = s.Channel("mouse", nil, func(data []byte) { r.App().Input(user.Index, byte(caged.Mouse), data) })
@@ -295,6 +300,38 @@ func (c *coordinator) HandleGameStart(rq api.StartGameRequest, w *Worker) api.Ou
 	}
 
 	return api.Out{Payload: response}
+}
+
+func handleWebRTCControl(data []byte, roomID string, sess room.Session, w *Worker) bool {
+	var packet struct {
+		T       api.PT          `json:"t"`
+		Payload json.RawMessage `json:"p"`
+	}
+	if err := json.Unmarshal(data, &packet); err != nil || packet.T == 0 {
+		return false
+	}
+
+	switch packet.T {
+	case api.NDSFlushSave:
+		var request api.NDSFlushSaveRequest
+		if len(packet.Payload) > 0 {
+			_ = json.Unmarshal(packet.Payload, &request)
+		}
+		if request.RoomID == "" {
+			request.RoomID = roomID
+		}
+		status := w.flushNDSSaveUploadStatus(request.RoomID)
+		response, err := api.Wrap(api.Out{
+			T:       uint8(api.NDSSaveUploaded),
+			Payload: status,
+		})
+		if err == nil {
+			sess.SendData(response)
+		}
+		return true
+	default:
+		return false
+	}
 }
 
 func removeUserFromRoom(w *Worker, user *room.GameSession) {
