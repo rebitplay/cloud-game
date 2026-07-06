@@ -48,7 +48,9 @@ jobs:
         with:
           context: .
           target: bunny-magic
+          platforms: linux/amd64
           push: true
+          provenance: false
           tags: ghcr.io/${{ env.IMAGE_NAME }}:${{ steps.tag.outputs.image_tag }}
           build-args: |
             VERSION=${{ steps.tag.outputs.version }}

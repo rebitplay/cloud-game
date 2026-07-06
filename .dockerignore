@@ -7,9 +7,6 @@
 assets/**
 !assets/cores/
 !assets/cores/melondslan_libretro.so
-!assets/games/
-!assets/games/nds/
-!assets/games/nds/Tetris-DS-(USA).nds
 !go.mod
 !go.sum
 !LICENSE

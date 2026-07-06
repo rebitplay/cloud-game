@@ -87,3 +87,9 @@ nvram/
 *.mcd
 /assets/
 /libretro/
+
+!/assets/
+/assets/*
+!/assets/cores/
+/assets/cores/*
+!/assets/cores/melondslan_libretro.so
