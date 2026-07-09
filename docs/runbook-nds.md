@@ -19,21 +19,31 @@ TCP 8000
 UDP 8641
 ```
 
+Regional applications:
+
+| Rebit region | Bunny region | Application ID | HTTPS endpoint | Anycast IP |
+| --- | --- | --- | --- | --- |
+| `sg` | Singapore (`SG`) | `71qZ2gP10g3NCih` | `https://mc-3zy4wczxqt.b-cdn.net` | `109.224.229.142` |
+| `na` | New York (`NY`) | `9ZlpOR80rjKBvzc` | `https://mc-sdr0hg00iu.bunny.run` | `109.224.228.81` |
+| `eu` | Germany (`DE`) | `BNROgZ6bLqqZuzr` | `https://mc-5jsc2z7gtg.bunny.run` | `109.224.228.48` |
+| `sa` | Brazil (`BR`) | `8yHsPf4mHEwMGhB` | `https://mc-s8ih8h5x0o.bunny.run` | `109.224.228.77` |
+
+Each application must remain static in exactly one required region with autoscaling `min=1`, `max=1`. The room registry and WebRTC mux routes are process-local.
+
 Core environment:
 
 ```text
 HTTP_ADDRESS=:8000
 NDS_API_KEY=<shared Rebit -> cloud-game API key>
 NDS_TOKEN_SECRET=<long random HS256 secret>
-NDS_PUBLIC_ENDPOINT=http://109.224.230.118:8000
+NDS_PUBLIC_ENDPOINT=https://<regional-https-endpoint>
 NDS_DOWNLOAD_ALLOWED_HOSTS=<Rebit/Bunny ROM and save host allowlist>
-NDS_WEBHOOK_URL=https://<rebit>/api/nds-cloud/webhook
-NDS_WEBHOOK_SECRET=<shared cloud-game -> Rebit webhook secret>
+NDS_WEBHOOK_URL=
 NDS_PUBLIC_METRICS=true
 CLOUD_GAME_COORDINATOR_ORIGIN_USERWS=*
 RUNTIME_DIR=/tmp/cloud-game/nds-lan
 WEBRTC_MUX_ENABLED=true
-WEBRTC_PUBLIC_IP=109.224.230.118
+WEBRTC_PUBLIC_IP=<regional-anycast-ip>
 WEBRTC_PUBLIC_PORT=8641
 WEBRTC_MUX_LISTEN_ADDR=0.0.0.0:8641
 NDS_TURN_URLS=turn:<turn-host>:3478?transport=udp,turn:<turn-host>:3478?transport=tcp
@@ -59,7 +69,7 @@ Firefox failure is not a wait-time issue once the console reports `WebRTC: ICE f
 Run the bundled readiness verifier after every Bunny redeploy:
 
 ```bash
-NDS_ENDPOINT=http://109.224.230.118:8000 \
+NDS_ENDPOINT=http://109.224.229.142:8000 \
 NDS_PUBLIC_PREFLIGHT_ONLY=true \
 node scripts/verify-bunny-nds.mjs
 ```
@@ -69,10 +79,10 @@ The public preflight does not require `NDS_API_KEY`. It checks that the deployed
 Then run the authenticated verifier:
 
 ```bash
-NDS_ENDPOINT=http://109.224.230.118:8000 \
+NDS_ENDPOINT=http://109.224.229.142:8000 \
 NDS_API_KEY="$NDS_API_KEY" \
 NDS_EXPECT_VERSION=badf96e9-watermark-20260704111440 \
-NDS_EXPECT_PUBLIC_IP=109.224.230.118 \
+NDS_EXPECT_PUBLIC_IP=109.224.229.142 \
 NDS_EXPECT_PUBLIC_PORT=8641 \
 NDS_REQUIRE_TURN=true \
 NDS_REQUIRE_METRICS=true \
@@ -84,16 +94,16 @@ node scripts/verify-bunny-nds.mjs
 For Firefox support on Bunny this script must pass. It fails on stale frontend assets, stale demo API paths, missing TURN configuration, missing metrics, or insufficient lazy-spawn capacity.
 
 ```bash
-curl -fsS http://109.224.230.118:8000/healthz
+curl -fsS http://109.224.229.142:8000/healthz
 curl -fsS -H "Authorization: Bearer $NDS_API_KEY" \
-  http://109.224.230.118:8000/buildz
+  http://109.224.229.142:8000/buildz
 curl -fsS -H "Authorization: Bearer $NDS_API_KEY" \
-  http://109.224.230.118:8000/v1/capacity
+  http://109.224.229.142:8000/v1/capacity
 curl -fsS -H "Authorization: Bearer $NDS_API_KEY" \
-  http://109.224.230.118:8000/v1/time
+  http://109.224.229.142:8000/v1/time
 ```
 
-`/buildz` should report `webrtc_asset:"webrtc.js?v=10"` or newer, `webrtc_firefox_relay_policy:true`, `webrtc_mux_enabled:true`, `webrtc_public_ip:"109.224.230.118"`, `webrtc_public_port:"8641"`, and `metrics_enabled:true`. For M4 capture-latency proof runs it should also report `nds_latency_watermark_enabled:true`. For Firefox on Bunny, it should also report `nds_rest_turn_configured:true` or have a non-zero `config_turn_count`.
+`/buildz` should report `webrtc_asset:"webrtc.js?v=10"` or newer, `webrtc_firefox_relay_policy:true`, `webrtc_mux_enabled:true`, `webrtc_public_ip:"109.224.229.142"`, `webrtc_public_port:"8641"`, and `metrics_enabled:true`. For M4 capture-latency proof runs it should also report `nds_latency_watermark_enabled:true`. For Firefox on Bunny, it should also report `nds_rest_turn_configured:true` or have a non-zero `config_turn_count`.
 
 Create-room failures should be machine-readable JSON. A healthy but full container returns `503 no_capacity`.
 
@@ -103,27 +113,20 @@ Rebit provisions rooms server-to-server and the browser connects directly to the
 
 ```text
 NDS_CLOUD_REGION=sg
-NDS_CLOUD_ENDPOINT=http://109.224.230.118:8000
-NDS_CLOUD_SG_ENDPOINT=http://109.224.230.118:8000
-NDS_CLOUD_US_ENDPOINT=
-NDS_CLOUD_EU_ENDPOINT=
+NDS_CLOUD_ENDPOINT=https://mc-3zy4wczxqt.bunny.run
+NDS_CLOUD_SG_ENDPOINT=https://mc-3zy4wczxqt.bunny.run
+NDS_CLOUD_NA_ENDPOINT=https://mc-sdr0hg00iu.bunny.run
+NDS_CLOUD_EU_ENDPOINT=https://mc-5jsc2z7gtg.bunny.run
+NDS_CLOUD_SA_ENDPOINT=https://mc-s8ih8h5x0o.bunny.run
 NDS_CLOUD_API_KEY=<same value as cloud-game NDS_API_KEY>
-NDS_CLOUD_WEBHOOK_SECRET=<same value as cloud-game NDS_WEBHOOK_SECRET>
-NDS_CLOUD_TIMEOUT=30
 APP_URL=https://<public-rebit-host>
 ```
 
-`config/services.php` maps these into `services.nds_cloud`. Rebit first tries the requested/default region, then falls through the remaining configured endpoints only when cloud-game returns `503 {"code":"no_capacity"}`. The saved `nds_cloud_sessions.endpoint` is the exact container endpoint used for later token refresh and close requests.
+`rebit-signal` validates the host's `sg`, `na`, `eu`, or `sa` selection, provisions only that configured regional endpoint, and retains the endpoint on the room for cleanup. It does not silently move an explicitly selected room to another region.
 
-`APP_URL` must be publicly reachable from Bunny because Rebit signs per-seat save PUT URLs under `/api/nds-cloud/sessions/{room}/players/{player}/save`. Add that host, plus the ROM CDN host, to `NDS_DOWNLOAD_ALLOWED_HOSTS` on Bunny. Do not template a signed save URL after signing; Rebit signs the final room/player path for each seat.
+`APP_URL` must be publicly reachable from Bunny because Rebit signs per-seat save PUT URLs under `/api/nds-cloud/signal-saves/{game}`. Add that host, plus the ROM CDN host, to `NDS_DOWNLOAD_ALLOWED_HOSTS` on every regional app.
 
-The webhook endpoint is:
-
-```text
-POST /api/nds-cloud/webhook
-```
-
-It requires `X-NDS-Delivery`, `X-NDS-Timestamp`, and `X-NDS-Signature: sha256=<hmac>`, dedupes deliveries, updates the `nds_cloud_sessions` row, registers `save.uploaded` payloads as `GameSave` versions, and broadcasts lobby state changes.
+The current signal-managed NDS flow does not expose the old Laravel NDS webhook endpoint. Leave `NDS_WEBHOOK_URL` empty to avoid retries against a removed route.
 
 ## Metrics
 
@@ -160,7 +163,7 @@ Before running the M4 load proof, confirm the deployed container exposes metrics
 
 ```bash
 curl -fsS -H "Authorization: Bearer $NDS_API_KEY" \
-  http://109.224.230.118:8000/metrics | grep cloud_game_nds_rooms
+  http://109.224.229.142:8000/metrics | grep cloud_game_nds_rooms
 ```
 
 If this returns `404`, the container is missing `NDS_PUBLIC_METRICS=true` or is still running an image older than the coordinator metrics route. If it returns `401`, the API key does not match the deployed `NDS_API_KEY`.
@@ -191,7 +194,7 @@ Run a 2-room, 4-player capacity test:
 cd ../rebit
 NDS_SAVE_UPLOAD_LISTEN=0.0.0.0:18080 \
 NDS_SAVE_UPLOAD_PUBLIC_BASE_URL=http://<load-runner-public-host>:18080 \
-NDS_ENDPOINT=http://109.224.230.118:8000 \
+NDS_ENDPOINT=http://109.224.229.142:8000 \
 NDS_API_KEY="$NDS_API_KEY" \
 NDS_ROM_URL="https://<cdn>/Tetris-DS-USA.nds" \
 NDS_ROM_SHA1="<40-char-sha1>" \
@@ -210,7 +213,7 @@ NDS_REQUIRE_VIDEO_LATENCY=true \
 NDS_REQUIRE_CAPTURE_LATENCY=true \
 NDS_REQUIRE_LATENCY_WATERMARK=true \
 NDS_REQUIRE_INPUT_FRAME_LATENCY=true \
-NDS_METRICS_URL=http://109.224.230.118:8000/metrics \
+NDS_METRICS_URL=http://109.224.229.142:8000/metrics \
 NDS_CLOSE_SETTLE_MS=10000 \
 NDS_SAVE_UPLOAD_FAILURE_MAX=0 \
 NDS_WEBHOOK_RETRY_MAX=0 \
@@ -273,10 +276,10 @@ Failure deltas: 0 save-upload failures, 0 webhook retries
 
 If Firefox reports `WebRTC: ICE failed`:
 
-1. Confirm Bunny is running the digest above, not an older cached tag: `curl -fsS -H "Authorization: Bearer $NDS_API_KEY" http://109.224.230.118:8000/buildz`.
+1. Confirm Bunny is running the digest above, not an older cached tag: `curl -fsS -H "Authorization: Bearer $NDS_API_KEY" http://109.224.229.142:8000/buildz`.
 2. If `/buildz` shows `nds_rest_turn_configured:false` and `config_turn_count:0`, configure `NDS_TURN_URLS` and `NDS_TURN_SECRET`; Firefox should not be treated as supported on Bunny until that is true.
 3. Confirm UDP 8641 is exposed and mapped to the container for Chrome/Edge direct mux tests.
-4. Confirm `WEBRTC_MUX_ENABLED=true`, `WEBRTC_PUBLIC_IP=109.224.230.118`, and `WEBRTC_PUBLIC_PORT=8641`.
+4. Confirm `WEBRTC_MUX_ENABLED=true`, `WEBRTC_PUBLIC_IP=109.224.229.142`, and `WEBRTC_PUBLIC_PORT=8641`.
 5. In Firefox `about:webrtc`, confirm the selected candidate pair uses `relay` after TURN is configured.
 6. Confirm TURN credentials are present in `INIT` and relay candidates are not rewritten by the mux.
 7. Check `cloud_game_nds_token_failures_total` and container logs for token/session mismatches.

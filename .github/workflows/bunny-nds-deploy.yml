@@ -12,15 +12,16 @@ concurrency:
 
 env:
   IMAGE_NAME: rebitplay/cloud-game
-  BUNNY_APP_ID: 71qZ2gP10g3NCih
   BUNNY_CONTAINER_NAME: Container-1
 
 jobs:
-  deploy:
+  build:
     runs-on: ubuntu-latest
     permissions:
       contents: read
       packages: write
+    outputs:
+      image_tag: ${{ steps.tag.outputs.image_tag }}
 
     steps:
       - uses: actions/checkout@v4
@@ -59,10 +60,49 @@ jobs:
         shell: bash
         run: docker push ghcr.io/${{ env.IMAGE_NAME }}:${{ steps.tag.outputs.image_tag }}
 
-      - name: Update Bunny container image
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - region: sg
+            app_id: 71qZ2gP10g3NCih
+            endpoint: https://mc-3zy4wczxqt.b-cdn.net
+          - region: na
+            app_id: 9ZlpOR80rjKBvzc
+            endpoint: https://mc-sdr0hg00iu.bunny.run
+          - region: eu
+            app_id: BNROgZ6bLqqZuzr
+            endpoint: https://mc-5jsc2z7gtg.bunny.run
+          - region: sa
+            app_id: 8yHsPf4mHEwMGhB
+            endpoint: https://mc-s8ih8h5x0o.bunny.run
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Update Bunny ${{ matrix.region }} container image
         uses: BunnyWay/actions/container-update-image@main
         with:
-          app_id: ${{ env.BUNNY_APP_ID }}
+          app_id: ${{ matrix.app_id }}
           api_key: ${{ secrets.BUNNYNET_API_KEY }}
           container: ${{ env.BUNNY_CONTAINER_NAME }}
-          image_tag: ${{ steps.tag.outputs.image_tag }}
+          image_tag: ${{ needs.build.outputs.image_tag }}
+
+      - name: Verify Bunny ${{ matrix.region }} public endpoint
+        shell: bash
+        env:
+          NDS_ENDPOINT: ${{ matrix.endpoint }}
+          NDS_PUBLIC_PREFLIGHT_ONLY: "true"
+        run: |
+          for attempt in {1..30}; do
+            if node scripts/verify-bunny-nds.mjs; then
+              exit 0
+            fi
+            sleep 10
+          done
+          exit 1
