@@ -26,7 +26,6 @@ Regional applications:
 | `sg` | Singapore (`SG`) | `71qZ2gP10g3NCih` | `https://mc-3zy4wczxqt.b-cdn.net` | `109.224.229.142` |
 | `na` | New York (`NY`) | `9ZlpOR80rjKBvzc` | `https://mc-sdr0hg00iu.bunny.run` | `109.224.228.81` |
 | `eu` | Germany (`DE`) | `BNROgZ6bLqqZuzr` | `https://mc-5jsc2z7gtg.bunny.run` | `109.224.228.48` |
-| `sa` | Brazil (`BR`) | `8yHsPf4mHEwMGhB` | `https://mc-s8ih8h5x0o.bunny.run` | `109.224.228.77` |
 
 Each application must remain static in exactly one required region with autoscaling `min=1`, `max=1`. The room registry and WebRTC mux routes are process-local.
 
@@ -117,12 +116,11 @@ NDS_CLOUD_ENDPOINT=https://mc-3zy4wczxqt.bunny.run
 NDS_CLOUD_SG_ENDPOINT=https://mc-3zy4wczxqt.bunny.run
 NDS_CLOUD_NA_ENDPOINT=https://mc-sdr0hg00iu.bunny.run
 NDS_CLOUD_EU_ENDPOINT=https://mc-5jsc2z7gtg.bunny.run
-NDS_CLOUD_SA_ENDPOINT=https://mc-s8ih8h5x0o.bunny.run
 NDS_CLOUD_API_KEY=<same value as cloud-game NDS_API_KEY>
 APP_URL=https://<public-rebit-host>
 ```
 
-`rebit-signal` validates the host's `sg`, `na`, `eu`, or `sa` selection, provisions only that configured regional endpoint, and retains the endpoint on the room for cleanup. It does not silently move an explicitly selected room to another region.
+`rebit-signal` validates the host's `sg`, `na`, or `eu` selection, provisions only that configured regional endpoint, and retains the endpoint on the room for cleanup. It does not silently move an explicitly selected room to another region.
 
 `APP_URL` must be publicly reachable from Bunny because Rebit signs per-seat save PUT URLs under `/api/nds-cloud/signal-saves/{game}`. Add that host, plus the ROM CDN host, to `NDS_DOWNLOAD_ALLOWED_HOSTS` on every regional app.
 

@@ -78,9 +78,6 @@ jobs:
           - region: eu
             app_id: BNROgZ6bLqqZuzr
             endpoint: https://mc-5jsc2z7gtg.bunny.run
-          - region: sa
-            app_id: 8yHsPf4mHEwMGhB
-            endpoint: https://mc-s8ih8h5x0o.bunny.run
 
     steps:
       - uses: actions/checkout@v4
