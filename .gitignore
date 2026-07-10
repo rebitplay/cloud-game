@@ -93,3 +93,8 @@ nvram/
 !/assets/cores/
 /assets/cores/*
 !/assets/cores/melondslan_libretro.so
+!/assets/games/
+/assets/games/*
+!/assets/games/nds/
+/assets/games/nds/*
+!/assets/games/nds/blocksds-local-multiplayer.nds

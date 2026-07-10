@@ -190,6 +190,7 @@ RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
     rm -rf /var/lib/apt/lists/* /var/log/* /usr/share/bug /usr/share/doc /usr/share/doc-base
 
 COPY assets/cores/melondslan_libretro.so ./assets/cores/
+COPY assets/games/nds/blocksds-local-multiplayer.nds ./assets/games/nds/
 COPY scripts/bunny-entrypoint.sh ./bunny-entrypoint.sh
 
 RUN useradd --system --home /usr/local/share/cloud-game --shell /usr/sbin/nologin cloudgame && \
