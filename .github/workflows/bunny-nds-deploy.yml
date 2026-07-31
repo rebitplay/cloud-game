@@ -72,12 +72,14 @@ jobs:
           - region: sg
             app_id: 71qZ2gP10g3NCih
             endpoint: https://mc-3zy4wczxqt.b-cdn.net
-          - region: na
-            app_id: 9ZlpOR80rjKBvzc
-            endpoint: https://mc-sdr0hg00iu.bunny.run
-          - region: eu
-            app_id: BNROgZ6bLqqZuzr
-            endpoint: https://mc-5jsc2z7gtg.bunny.run
+          # NA and EU are retired to reduce idle Bunny container cost. Keep the
+          # metadata commented so the pools can be restored intentionally later.
+          # - region: na
+          #   app_id: 9ZlpOR80rjKBvzc
+          #   endpoint: https://mc-sdr0hg00iu.bunny.run
+          # - region: eu
+          #   app_id: BNROgZ6bLqqZuzr
+          #   endpoint: https://mc-5jsc2z7gtg.bunny.run
           - region: sa
             app_id: hoVKDncM2BMRBVx
             endpoint: https://mc-0s8zmw18ex.bunny.run
